@@ -37,6 +37,8 @@ RUN mkdir /data && mkdir /video
 # Final image --------------------------------------------------------------------------------------
 FROM gcr.io/distroless/nodejs24-debian13:${DISTROLESS_VARIANT} AS main
 
+ARG APP_VERSION
+
 # Copy project from build
 COPY --from=handbrake-build /rootfs/base/var/lib/handbrake/preset_builtin.json /var/lib/handbrake/preset_builtin.json
 COPY --from=client-build /handbrake-web/client/build /handbrake-web/client
@@ -47,6 +49,7 @@ COPY --from=server-build --chown=nonroot /video /data /
 EXPOSE 9999
 ENV NODE_ENV=production
 ENV HANDBRAKE_MODE=server
+ENV HANDBRAKE_WEB_VERSION=${APP_VERSION}
 ENV DATA_PATH=/data
 ENV VIDEO_PATH=/video
 

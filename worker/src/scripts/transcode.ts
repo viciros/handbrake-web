@@ -16,6 +16,7 @@ import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import { spawn, type ChildProcessWithoutNullStreams as ChildProcess } from 'child_process';
 import { access, mkdir, rename, rm, writeFile } from 'fs/promises';
 import logger, { SendLogToServer } from 'logging';
+import { availableParallelism } from 'os';
 import path from 'path';
 import { env } from 'process';
 import { Socket } from 'socket.io-client';
@@ -31,7 +32,7 @@ let presetPath: string | undefined;
 type ProgressPhase = 'scanning' | 'processing' | 'muxing';
 
 const displayedProgressScale = 10_000;
-const x265ThreadPoolOptions = ['pools=+', 'wpp=1'];
+const getX265ThreadPoolOptions = () => [`pools=${availableParallelism()}`, 'wpp'];
 
 const createProgressNormalizer = () => {
 	const lastProgressByPhase: Partial<Record<ProgressPhase, number>> = {};
@@ -67,7 +68,7 @@ const applyX265ThreadPoolDefaults = (preset: HandbrakePresetType) => ({
 			.map((option) => option.trim())
 			.filter((option) => option.length > 0);
 		const encoderOptionNames = encoderOptions.map(getEncoderOptionName);
-		const optionsToAppend = x265ThreadPoolOptions.filter((option) => {
+		const optionsToAppend = getX265ThreadPoolOptions().filter((option) => {
 			const optionName = getEncoderOptionName(option);
 
 			if (optionName == 'pools') {

@@ -21,6 +21,7 @@ RUN pnpm build
 # Node ---------------------------------------------------------------------------------------------
 FROM gcr.io/distroless/nodejs24-debian13:${DISTROLESS_VARIANT} AS main
 
+ARG APP_VERSION
 ARG TARGETARCH
 
 # Copy compiled HandBrakeCLI binary from the build step
@@ -32,6 +33,7 @@ COPY --from=worker-build /handbrake-web/worker/build /handbrake-web/worker
 
 # Default environment variables
 ENV HANDBRAKE_MODE=worker
+ENV HANDBRAKE_WEB_VERSION=${APP_VERSION}
 ENV DATA_PATH=/tmp/handbrake-web
 ENV VIDEO_PATH=/video
 
