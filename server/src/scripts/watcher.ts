@@ -87,16 +87,29 @@ export function RegisterWatcher(watcher: DetailedWatcherType) {
 		ignorePermissionErrors: true,
 	});
 
-	newWatcher.on('add', (path) => {
-		onWatcherDetectFileAdd(watcher, path);
+	const handleWatcherEvent = (
+		eventName: string,
+		filePath: string,
+		handler: (watcher: DetailedWatcherType, filePath: string) => Promise<void>
+	) => {
+		handler(watcher, filePath).catch((err) => {
+			logger.error(
+				`[server] [watcher] [error] Watcher '${watcher.watcher_id}' failed while handling '${eventName}' for '${filePath}'.`
+			);
+			logger.error(err);
+		});
+	};
+
+	newWatcher.on('add', (filePath) => {
+		handleWatcherEvent('add', filePath, onWatcherDetectFileAdd);
 	});
 
-	newWatcher.on('unlink', (path) => {
-		onWatcherDetectFileDelete(watcher, path);
+	newWatcher.on('unlink', (filePath) => {
+		handleWatcherEvent('unlink', filePath, onWatcherDetectFileDelete);
 	});
 
-	newWatcher.on('change', (path) => {
-		onWatcherDetectFileChange(watcher, path);
+	newWatcher.on('change', (filePath) => {
+		onWatcherDetectFileChange(watcher, filePath);
 	});
 
 	newWatcher.on('error', (error) => {
@@ -237,6 +250,13 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 								? WatcherRuleMediaInfoMethods[rule.rule_method]
 								: 0
 						];
+					if (comparisonMethod == undefined) {
+						logger.warn(
+							`[server] [watcher] [warn] Watcher rule '${rule.rule_id}' has an unsupported comparison method.`
+						);
+						return false;
+					}
+
 					let input = '';
 
 					switch (rule.base_rule_method) {
@@ -264,15 +284,19 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 
 							switch (rule.rule_method) {
 								case WatcherRuleMediaInfoMethods.MediaWidth:
+									if (videoStream.width == undefined) return false;
 									input = videoStream.width!.toString();
 									break;
 								case WatcherRuleMediaInfoMethods.MediaHeight:
+									if (videoStream.height == undefined) return false;
 									input = videoStream.height!.toString();
 									break;
 								case WatcherRuleMediaInfoMethods.MediaBitrate:
+									if (videoStream.bit_rate == undefined) return false;
 									input = ConvertBitsToKilobits(videoStream.bit_rate!).toFixed(0);
 									break;
 								case WatcherRuleMediaInfoMethods.MediaEncoder:
+									if (videoStream.codec_long_name == undefined) return false;
 									input = videoStream.codec_long_name!.toString();
 									break;
 							}
@@ -358,13 +382,21 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 					watcher.preset_id
 			  )
 			: GetPresetByName(watcher.preset_category, watcher.preset_id);
+		const presetFormat = presetData?.PresetList?.[0]?.FileFormat;
+		const outputPathExtension = presetFormat ? PresetFormatDict[presetFormat] : undefined;
+
+		if (!outputPathExtension) {
+			logger.warn(
+				`[server] [watcher] [warn] Watcher '${watcher.watcher_id}' could not find output format for preset '${watcher.preset_category}/${watcher.preset_id}'.`
+			);
+			return;
+		}
 
 		const parsedPath = path.parse(filePath);
 		const outputPathBase = watcher.output_path ? watcher.output_path : parsedPath.dir;
 		const outputPathName = parsedPath.name;
-		const outputPathExtension = PresetFormatDict[presetData.PresetList[0].FileFormat];
 		const outputPathFull = path.join(outputPathBase, outputPathName) + outputPathExtension;
-		const checkedOutputPath = (
+		const checkedOutputItem = (
 			await CheckFilenameCollision(outputPathBase, [
 				{
 					path: outputPathFull,
@@ -373,10 +405,17 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 					isDirectory: false,
 				},
 			])
-		)[0].path;
+		)[0];
+		if (!checkedOutputItem) {
+			logger.warn(
+				`[server] [watcher] [warn] Watcher '${watcher.watcher_id}' could not resolve output path for '${filePath}'.`
+			);
+			return;
+		}
+
 		const newJobRequest: AddJobType = {
 			input_path: filePath,
-			output_path: checkedOutputPath,
+			output_path: checkedOutputItem.path,
 			preset_category: watcher.preset_category,
 			preset_id: watcher.preset_id,
 		};

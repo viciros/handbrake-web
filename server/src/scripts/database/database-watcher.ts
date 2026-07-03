@@ -118,7 +118,7 @@ export async function DatabaseInsertWatcherRule(watcher_id: number, values: AddW
 
 export async function UpdateWatcherRuleInDatabase(rule_id: number, values: UpdateWatcherRuleType) {
 	try {
-		const result = database
+		const result = await database
 			.updateTable('watcher_rules')
 			.set(values)
 			.where('rule_id', '=', rule_id)
@@ -172,5 +172,6 @@ export async function RemoveWatcherRuleFromDatabase(rule_id: number) {
 			`[server] [database] [error] Could not remove a watcher rule with the id '${rule_id}' from the database.`
 		);
 		logger.error(err);
+		throw err;
 	}
 }
