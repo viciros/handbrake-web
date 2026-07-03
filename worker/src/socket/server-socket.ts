@@ -2,7 +2,14 @@ import type { WorkerProperties } from '@handbrake-web/shared/types/worker';
 import logger from 'logging';
 import { GetWorkerProperties } from 'scripts/properties';
 import { Socket } from 'socket.io-client';
-import { currentJobID, StartTranscode, StopTranscode } from '../scripts/transcode';
+import {
+	currentJobID,
+	isStartingTranscode,
+	isTranscoding,
+	StartTranscode,
+	type StartTranscodeResult,
+	StopTranscode,
+} from '../scripts/transcode';
 import { serverAddress } from '../worker-startup';
 
 const workerID = process.env.WORKER_ID;
@@ -45,21 +52,27 @@ export default function ServerSocket(server: Socket) {
 		callback(currentJobID);
 	});
 
-	server.on('start-transcode', async (jobID: number, callback: (jobID: number) => void) => {
-		logger.info(`[socket] Request to transcode queue entry '${jobID}'.`);
-		if (currentJobID) {
-			logger.warn(
-				`[socket] [warn] This worker is busy with job '${currentJobID}' - reporting to the server.`
-			);
-		} else {
-			logger.info(
-				`[socket] This worker is currently not busy with a job - starting work on job '${jobID}'.`
-			);
-			await StartTranscode(jobID, server);
+	server.on(
+		'start-transcode',
+		async (jobID: number, callback: (result: StartTranscodeResult) => void) => {
+			logger.info(`[socket] Request to transcode queue entry '${jobID}'.`);
+			if (isTranscoding() || isStartingTranscode()) {
+				logger.warn(
+					`[socket] [warn] This worker is busy with job '${currentJobID}' - reporting to the server.`
+				);
+				callback({
+					ok: false,
+					currentJobID,
+					error: 'Worker is already busy.',
+				});
+			} else {
+				logger.info(
+					`[socket] This worker is currently not busy with a job - starting work on job '${jobID}'.`
+				);
+				callback(await StartTranscode(jobID, server));
+			}
 		}
-
-		callback(currentJobID || jobID);
-	});
+	);
 
 	server.on('stop-transcode', async (jobID: number, callback?: () => void) => {
 		logger.info(`[socket] Request to stop transcoding the current job with id '${jobID}'.`);

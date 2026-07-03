@@ -15,7 +15,9 @@ let info: WorkerProperties | null = null;
 export async function GetWorkerProperties(): Promise<WorkerProperties> {
 	if (info == null) {
 		try {
-			const handbrake = await execFilePromise('HandBrakeCLI', ['--version']);
+			const handbrake = await execFilePromise('HandBrakeCLI', ['--version'], {
+				timeout: 10000,
+			});
 
 			const version = GetWorkerVersions(handbrake);
 			logger.info(`[properties] HandBrake Web Application Version = ${version.application}`);
@@ -26,10 +28,11 @@ export async function GetWorkerProperties(): Promise<WorkerProperties> {
 				logger.info(`[properties] Capability '${name}' support = ${capability}`);
 			});
 
-			return {
+			info = {
 				version,
 				capabilities,
 			};
+			return info;
 		} catch (err) {
 			logger.error(`[capabilities] [error] Could not get the worker's info.`);
 			throw err;
@@ -79,23 +82,24 @@ function GetWorkerCapabilities(handbrake: { stdout: string; stderr: string }): W
 
 		const qsvRegex = /qsv:\s(\w+)\savailable\son\sthis\ssystem/;
 		const qsvMatch = handbrake.stderr.match(qsvRegex);
-		if (qsvMatch == null)
-			throw new Error(
-				`No version match in:\n${handbrake.stderr}\n for regex '${qsvRegex.toString()}'.`
+		if (qsvMatch == null) {
+			logger.warn(
+				`[capabilities] [warn] Could not detect QSV support from HandBrake output; assuming unsupported.`
 			);
-		const qsvResult = qsvMatch[1]! == 'is';
-		capabilities.qsv = qsvResult;
+		} else {
+			const qsvResult = qsvMatch[1]! == 'is';
+			capabilities.qsv = qsvResult;
+		}
 
 		const nvencRegex = /nvenc:\sversion\s\d+\.\d+\s(\w+)\savailable/;
 		const nvencNegativeRegex = /Cannot\sload\slibnvidia-encode\.so\.1/;
 		const nvencMatch = handbrake.stderr.match(nvencRegex);
 		const nvencNegativeMatch = handbrake.stderr.match(nvencNegativeRegex);
-		if (nvencMatch == null && nvencNegativeMatch == null)
-			throw new Error(
-				`No version match in:\n${
-					handbrake.stderr
-				}\n for regex '${nvencRegex.toString()}' or '${nvencNegativeRegex.toString()}'.`
+		if (nvencMatch == null && nvencNegativeMatch == null) {
+			logger.warn(
+				`[capabilities] [warn] Could not detect NVENC support from HandBrake output; assuming unsupported.`
 			);
+		}
 		const nvencResult = nvencMatch != null;
 		capabilities.nvenc = nvencResult;
 
