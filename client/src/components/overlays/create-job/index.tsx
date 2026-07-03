@@ -6,7 +6,13 @@ import { useContext, useState } from 'react';
 import Overlay from '~components/root/overlay';
 import { PrimaryContext } from '~layouts/primary/context';
 import { CreateJobContext, CreateJobContextType } from './context';
-import { FilterVideoFiles, GetOutputItemsFromInputItems, RequestDirectory } from './funcs';
+import {
+	CheckNameCollision,
+	FilterVideoFiles,
+	GetOutputItemFromInputItem,
+	GetOutputItemsFromInputItems,
+	RequestDirectory,
+} from './funcs';
 import ButtonsSection from './sections/buttons-section';
 import InputSection from './sections/input-section';
 import ModeSection from './sections/mode-section';
@@ -48,20 +54,28 @@ export default function CreateJob({ onClose }: Properties) {
 
 	// Results -----------------------------------------------------------------
 	const [seeMore, setSeeMore] = useState(false);
+	const socketAckTimeoutMs = 10000;
 
-	const getOutputExtensionFromPreset = (category: string, name: string) =>
-		PresetFormatDict[
-			(isDefaultPreset
-				? defaultPresets[category.replace(/[Dd]efault: /, '')]
-				: presets[category])[name].PresetList[0].FileFormat
-		];
+	const isDefaultPresetCategory = (category: string) => category.includes('Default: ');
+	const getPresetCollection = (category: string) =>
+		isDefaultPresetCategory(category)
+			? defaultPresets[category.replace(/^Default:\s/, '')]
+			: presets[category];
+	const getPreset = (category: string, name: string) => getPresetCollection(category)?.[name];
+	const getOutputExtensionFromPreset = (category: string, name: string) => {
+		const presetFormat = getPreset(category, name)?.PresetList[0].FileFormat;
+		return presetFormat ? PresetFormatDict[presetFormat] : HandbrakeOutputExtensions.mkv;
+	};
+	const selectedPreset = getPreset(presetCategory, preset);
 
 	const canSubmit =
 		inputPath != '' &&
 		inputFiles.length > 0 &&
 		outputPath != '' &&
 		outputFiles.length > 0 &&
+		outputFiles.length == inputFiles.length &&
 		preset != '' &&
+		selectedPreset != undefined &&
 		((!nameCollision && !allowCollision) || (nameCollision && allowCollision));
 	// noExistingCollision;
 
@@ -99,83 +113,75 @@ export default function CreateJob({ onClose }: Properties) {
 		// 	console.log(`[client] New job sent to the server.\n${newJob}`);
 		// });
 
-		for await (const [index, inputFile] of inputFiles.entries()) {
+		if (!selectedPreset) return;
+
+		for (const [index, inputFile] of inputFiles.entries()) {
 			const outputFile = outputFiles[index];
+			if (!outputFile) {
+				console.error(`[client] [error] Missing output file for '${inputFile.path}'.`);
+				return;
+			}
+
 			const newJob: AddJobType = {
 				input_path: inputFile.path,
 				output_path: outputFile.path,
 				preset_category: presetCategory,
 				preset_id: preset,
 			};
-			await socket.emitWithAck('add-job', newJob);
-			console.log(`[client] New job sent to the server.\n${JSON.stringify(newJob, null, 2)}`);
+			try {
+				await socket.timeout(socketAckTimeoutMs).emitWithAck('add-job', newJob);
+				console.log(
+					`[client] New job sent to the server.\n${JSON.stringify(newJob, null, 2)}`
+				);
+			} catch (err) {
+				console.error(`[client] [error] Could not add job for '${inputFile.path}'.`);
+				console.error(err);
+				return;
+			}
 		}
 
 		onClose();
 	};
 
 	const handleFileInputConfirm = async (item: DirectoryItemType) => {
-		// const prevPath =
-		// 	inputFiles.length > 0
-		// 		? inputFiles[0].path.replace(inputFiles[0].name + inputFiles[0].extension, '')
-		// 		: undefined;
-		// console.log(prevPath == outputPath);
-
-		// Set input variables
 		setInputPath(item.path);
 		setInputFiles([item]);
 
-		// Set the output variables if the path is not set
-		if (!outputPath || !outputChanged) {
-			// const parentPath = item.path.replace(item.name + item.extension, '');
-			const newOutputPath = config.paths['output-path']
-				? config.paths['output-path']
-				: item.path.replace(`/${item.name}${item.extension}`, '');
-			setOutputPath(newOutputPath);
+		const fileName = `${item.name}${item.extension ?? ''}`;
+		const parentPath = item.path.endsWith(fileName)
+			? item.path.slice(0, -fileName.length).replace(/[\\/]+$/, '')
+			: item.path;
+		const newOutputPath =
+			outputChanged && outputPath ? outputPath : config.paths['output-path'] || parentPath;
+		const newOutputFiles: DirectoryItemsType = [
+			GetOutputItemFromInputItem(item, newOutputPath, outputExtension),
+		];
+		const dedupedOutputFiles = await CheckNameCollision(socket, newOutputPath, newOutputFiles);
 
-			const newOutputFiles: DirectoryItemsType = [
-				{
-					path: `${newOutputPath}/${item.name}${outputExtension}`,
-					name: item.name,
-					extension: outputExtension,
-					isDirectory: false,
-				},
-			];
-			const dedupedOutputFiles = await socket.emitWithAck(
-				'check-name-collision',
-				newOutputPath,
-				newOutputFiles
-			);
-			setOutputFiles(dedupedOutputFiles);
-		}
+		setOutputPath(newOutputPath);
+		setOutputFiles(dedupedOutputFiles);
+		setNameCollision(false);
+		setAllowCollision(false);
 	};
 
 	const handleDirectoryInputConfirm = async (item: DirectoryItemType) => {
-		// Get input/output variables
-		const inputPathItems: DirectoryItemsType = FilterVideoFiles(
-			(await RequestDirectory(socket, item.path, isRecursive)).items
-		);
+		const directory = await RequestDirectory(socket, item.path, isRecursive);
+		if (!directory) return;
+
+		const inputPathItems: DirectoryItemsType = FilterVideoFiles(directory.items);
 
 		const newOutputPath = outputChanged
 			? outputPath
 			: config.paths['output-path']
 			? config.paths['output-path']
 			: item.path;
-		const newOutputFiles: DirectoryItemsType = inputPathItems.map((inputItem) => {
-			return {
-				path: `${newOutputPath}/${inputItem.name}${outputExtension}`,
-				name: inputItem.name,
-				extension: outputExtension,
-				isDirectory: inputItem.isDirectory,
-			};
-		});
-		const dedupedOutputFiles = await socket.emitWithAck(
-			'check-name-collision',
+		const newOutputFiles = GetOutputItemsFromInputItems(
+			inputPathItems,
 			newOutputPath,
-			newOutputFiles
+			outputExtension
 		);
+		const dedupedOutputFiles = await CheckNameCollision(socket, newOutputPath, newOutputFiles);
 
-		// Set input/output states
 		setInputPath(item.path);
 		if (outputPath != newOutputPath) {
 			setOutputPath(newOutputPath);
@@ -183,57 +189,53 @@ export default function CreateJob({ onClose }: Properties) {
 
 		setInputFiles(inputPathItems);
 		setOutputFiles(dedupedOutputFiles);
+		setNameCollision(false);
+		setAllowCollision(false);
 	};
 
 	const handleInputConfirm = async (item: DirectoryItemType) => {
 		switch (jobFrom) {
 			case JobFrom.FromFile:
-				handleFileInputConfirm(item);
+				await handleFileInputConfirm(item);
 				break;
 			case JobFrom.FromDirectory:
-				handleDirectoryInputConfirm(item);
+				await handleDirectoryInputConfirm(item);
 				break;
 		}
 	};
 
 	const handleRecursiveChange: React.ChangeEventHandler<HTMLInputElement> = (event) => {
-		const value = event.target.value == 'true';
+		const value = event.target.checked;
 
 		setIsRecursive(value);
 
-		if (inputPath) {
+		if (inputPath && outputPath) {
 			(async function () {
-				const newInputFiles = FilterVideoFiles(
-					(await RequestDirectory(socket, inputPath, value)).items
-				);
-				const newOutputFiles = await socket.emitWithAck(
-					'check-name-collision',
+				const directory = await RequestDirectory(socket, inputPath, value);
+				if (!directory) return;
+
+				const newInputFiles = FilterVideoFiles(directory.items);
+				const newOutputFiles = await CheckNameCollision(
+					socket,
 					outputPath,
-					GetOutputItemsFromInputItems(newInputFiles, outputExtension)
+					GetOutputItemsFromInputItems(newInputFiles, outputPath, outputExtension)
 				);
 				setInputFiles(newInputFiles);
 				setOutputFiles(newOutputFiles);
+				setNameCollision(false);
+				setAllowCollision(false);
 			})();
 		}
 	};
 
 	const handleOutputConfirm = async (item: DirectoryItemType) => {
 		setOutputPath(item.path);
-		const newOutputFiles = inputFiles.map((inputItem) => {
-			return {
-				path: item.path + '/' + inputItem.name + outputExtension,
-				name: inputItem.name,
-				extension: outputExtension,
-				isDirectory: inputItem.isDirectory,
-			};
-		});
-		const dedupedOutputFiles = await socket.emitWithAck(
-			'check-name-collision',
-			item.path,
-			newOutputFiles
-		);
+		const newOutputFiles = GetOutputItemsFromInputItems(inputFiles, item.path, outputExtension);
+		const dedupedOutputFiles = await CheckNameCollision(socket, item.path, newOutputFiles);
 		setOutputFiles(dedupedOutputFiles);
 		setOutputChanged(true);
+		setNameCollision(false);
+		setAllowCollision(false);
 	};
 
 	const handleAllowOverwriteSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -246,20 +248,27 @@ export default function CreateJob({ onClose }: Properties) {
 
 		if (outputFiles.length > 0) {
 			(async function () {
-				const newOutputFiles = [...outputFiles];
-				newOutputFiles[0].path = outputPath + '/' + name + outputExtension;
-				newOutputFiles[0].name = name;
+				const newOutputFiles = outputFiles.map((file, index) =>
+					index == 0
+						? {
+								...file,
+								path: `${outputPath.replace(/[\\/]+$/, '')}/${name}${outputExtension}`,
+								name: name,
+								extension: outputExtension,
+								isDirectory: false,
+						  }
+						: file
+				);
 				setOutputFiles(newOutputFiles);
 				setOutputChanged(true);
 
-				const existingFiles: DirectoryItemsType = (
-					await RequestDirectory(socket, outputPath)
-				).items;
-				if (
-					existingFiles
-						.map((item) => item.name + item.extension)
-						.includes(newOutputFiles[0].name + newOutputFiles[0].extension)
-				) {
+				const dedupedOutputFiles = await CheckNameCollision(socket, outputPath, newOutputFiles);
+				const requestedName = `${newOutputFiles[0].name}${newOutputFiles[0].extension}`;
+				const dedupedName = dedupedOutputFiles[0]
+					? `${dedupedOutputFiles[0].name}${dedupedOutputFiles[0].extension}`
+					: requestedName;
+
+				if (requestedName != dedupedName) {
 					setNameCollision(true);
 				} else if (nameCollision) {
 					setNameCollision(false);
@@ -314,50 +323,48 @@ export default function CreateJob({ onClose }: Properties) {
 	const handlePresetCategoryChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
 		const category = event.target.value;
 		setPresetCategory(category);
-		setIsDefaultPreset(category.includes('Default: '));
+		setIsDefaultPreset(isDefaultPresetCategory(category));
+		setPreset('');
+		setOutputFiles([]);
+		setNameCollision(false);
+		setAllowCollision(false);
 	};
 
 	const handlePresetChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
 		const newPreset = event.target.value;
+		if (!newPreset || !getPreset(presetCategory, newPreset)) {
+			setPreset('');
+			setOutputFiles([]);
+			setNameCollision(false);
+			setAllowCollision(false);
+			return;
+		}
+
 		const newExtension = getOutputExtensionFromPreset(presetCategory, newPreset);
 
 		setPreset(newPreset);
 		setOutputExtension(newExtension);
 
-		const newOutputFiles = outputFiles.map((file) => {
-			const oldFileName = file.name + file.extension;
-
-			file.extension = newExtension;
-
-			const newFileName = file.name + file.extension;
-			file.path = file.path.replace(new RegExp(`${oldFileName}$`), newFileName);
-			return file;
-		});
+		const newOutputFiles =
+			jobFrom == JobFrom.FromFile && outputFiles[0]
+				? outputFiles.map((file) => ({
+						...file,
+						path: `${outputPath.replace(/[\\/]+$/, '')}/${file.name}${newExtension}`,
+						extension: newExtension,
+						isDirectory: false,
+				  }))
+				: GetOutputItemsFromInputItems(inputFiles, outputPath, newExtension);
 
 		if (outputPath) {
 			(async function () {
-				const existingFiles: DirectoryItemsType = (
-					await RequestDirectory(socket, outputPath)
-				).items;
-				if (jobFrom == JobFrom.FromFile) {
-					if (
-						existingFiles
-							.map((item) => item.name + item.extension)
-							.includes(newOutputFiles[0].name + newOutputFiles[0].extension)
-					) {
-						setNameCollision(true);
-					} else if (nameCollision) {
-						setNameCollision(false);
-					}
-					setOutputFiles(newOutputFiles);
-				} else {
-					const dedupedOutputFiles = await socket.emitWithAck(
-						'check-name-collision',
-						outputPath,
-						newOutputFiles
-					);
-					setOutputFiles(dedupedOutputFiles);
-				}
+				const dedupedOutputFiles = await CheckNameCollision(
+					socket,
+					outputPath,
+					newOutputFiles
+				);
+				setOutputFiles(dedupedOutputFiles);
+				setNameCollision(false);
+				setAllowCollision(false);
 			})();
 		}
 	};

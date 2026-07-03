@@ -1,4 +1,5 @@
 import {
+	DirectoryItemType,
 	DirectoryItemsType,
 	DirectoryRequestType,
 	DirectoryType,
@@ -6,13 +7,46 @@ import {
 import mime from 'mime';
 import { Socket } from 'socket.io-client';
 
-export async function RequestDirectory(socket: Socket, path: string, isRecursive: boolean = false) {
+const socketAckTimeoutMs = 10000;
+
+export async function RequestDirectory(
+	socket: Socket,
+	path: string,
+	isRecursive: boolean = false
+) {
 	const request: DirectoryRequestType = {
 		path: path,
 		isRecursive: isRecursive,
 	};
-	const response: DirectoryType = await socket.emitWithAck('get-directory', request);
-	return response;
+	try {
+		const response: DirectoryType = await socket
+			.timeout(socketAckTimeoutMs)
+			.emitWithAck('get-directory', request);
+		return response;
+	} catch (err) {
+		console.error(`[client] [error] Could not load directory '${path}'.`);
+		console.error(err);
+		return null;
+	}
+}
+
+export async function CheckNameCollision(
+	socket: Socket,
+	outputPath: string,
+	outputItems: DirectoryItemsType
+) {
+	if (!outputPath || outputItems.length == 0) return outputItems;
+
+	try {
+		const response: DirectoryItemsType = await socket
+			.timeout(socketAckTimeoutMs)
+			.emitWithAck('check-name-collision', outputPath, outputItems);
+		return response;
+	} catch (err) {
+		console.error(`[client] [error] Could not check output name collisions.`);
+		console.error(err);
+		return outputItems;
+	}
 }
 
 export function FilterVideoFiles(items: DirectoryItemsType) {
@@ -21,13 +55,30 @@ export function FilterVideoFiles(items: DirectoryItemsType) {
 		.filter((item) => mime.getType(item.path)?.includes('video'));
 }
 
-export function GetOutputItemsFromInputItems(inputItems: DirectoryItemsType, extension: string) {
+const JoinOutputPath = (outputPath: string, name: string, extension: string) => {
+	const directory = outputPath.replace(/[\\/]+$/, '');
+	return `${directory}/${name}${extension}`;
+};
+
+export function GetOutputItemFromInputItem(
+	inputItem: DirectoryItemType,
+	outputPath: string,
+	extension: string
+) {
+	return {
+		path: JoinOutputPath(outputPath, inputItem.name, extension),
+		name: inputItem.name,
+		extension: extension,
+		isDirectory: false,
+	};
+}
+
+export function GetOutputItemsFromInputItems(
+	inputItems: DirectoryItemsType,
+	outputPath: string,
+	extension: string
+) {
 	return inputItems.map((item) => {
-		return {
-			path: item.path.replace(item.extension!, extension),
-			name: item.name,
-			extension: extension,
-			isDirectory: item.isDirectory,
-		};
+		return GetOutputItemFromInputItem(item, outputPath, extension);
 	});
 }

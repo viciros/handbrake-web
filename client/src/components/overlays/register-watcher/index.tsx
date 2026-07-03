@@ -25,7 +25,13 @@ export default function RegisterWatcher({ onClose }: Properties) {
 	const [startQueue, setStartQueue] = useState(false);
 	const [isDefaultPreset, setIsDefaultPreset] = useState(false);
 
-	const canSubmit = watchPath && presetID;
+	const isDefaultPresetCategory = (category: string) => category.includes('Default: ');
+	const presetOptions = isDefaultPreset
+		? Object.keys(defaultPresets[presetCategory.replace(/^Default:\s/, '')] || {})
+		: Object.keys(presets[presetCategory] || {});
+	const canSubmit = Boolean(
+		watchPath && presetCategory && presetID && presetOptions.includes(presetID)
+	);
 
 	const handleWatchPathConfirm = (item: DirectoryItemType) => {
 		setWatchPath(item.path);
@@ -39,7 +45,8 @@ export default function RegisterWatcher({ onClose }: Properties) {
 		const category = event.target.value;
 
 		setPresetCategory(category);
-		setIsDefaultPreset(category.includes('Default: '));
+		setIsDefaultPreset(isDefaultPresetCategory(category));
+		setPresetID('');
 	};
 
 	const handlePresetChange = (event: React.ChangeEvent<HTMLSelectElement>) => {

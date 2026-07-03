@@ -6,14 +6,20 @@ interface Properties extends Omit<InputHTMLAttributes<HTMLInputElement>, 'value'
 	value?: boolean;
 }
 
-export default function CheckboxInput({ label, value, className, ...properties }: Properties) {
+export default function CheckboxInput({
+	label,
+	value,
+	className,
+	id = 'checkbox-input',
+	...properties
+}: Properties) {
 	return (
 		<div className={`checkbox-input ${styles['checkbox-input']} ${className || ''}`}>
-			{label && <label htmlFor={'checkbox-input'}>{label}</label>}
+			{label && <label htmlFor={id}>{label}</label>}
 			<input
 				type='checkbox'
-				id={'checkbox-input'}
-				value={value ? String(value) : undefined}
+				id={id}
+				checked={value}
 				{...properties}
 			/>
 		</div>

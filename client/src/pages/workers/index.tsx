@@ -7,7 +7,7 @@ import SummarySection from './sections/summary-section';
 import styles from './styles.module.scss';
 
 export type WorkerInfo = {
-	properties: WorkerProperties;
+	properties?: WorkerProperties;
 	status: string;
 	job: string;
 	progress: string;

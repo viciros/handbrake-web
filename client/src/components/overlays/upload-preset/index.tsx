@@ -27,22 +27,50 @@ export default function UploadPreset({ socket, presets, handleClose }: Propertie
 	);
 	const [newCategory, setNewCategory] = useState('');
 	const [presetName, setPresetName] = useState('');
+	const [fileError, setFileError] = useState('');
+
+	const getPresetName = (value: unknown) => {
+		const candidate = value as Partial<HandbrakePresetType> | null;
+		const name = candidate?.PresetList?.[0]?.PresetName;
+		return typeof name == 'string' && name.trim() ? name : null;
+	};
 
 	const handlePresetFile = (event: React.ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0];
-		if (file && file.type == 'application/json') {
-			const reader = new FileReader();
-			reader.onload = (event) => {
-				const result = event.target?.result?.toString();
-				const json: HandbrakePresetType = JSON.parse(result!);
-				setPreset(json);
-				setPresetName(json.PresetList[0].PresetName);
-				console.log(
-					`[client] Preset has been updated to '${json.PresetList[0].PresetName}'`
-				);
-			};
-			reader.readAsText(file);
+		setFileError('');
+
+		if (!file) return;
+		if (
+			file.type &&
+			file.type != 'application/json' &&
+			!file.name.toLowerCase().endsWith('.json')
+		) {
+			setPreset(null);
+			setPresetName('');
+			setFileError('Selected file is not JSON.');
+			return;
 		}
+
+		const reader = new FileReader();
+		reader.onload = (event) => {
+			try {
+				const result = event.target?.result?.toString();
+				const json: HandbrakePresetType = JSON.parse(result || '');
+				const name = getPresetName(json);
+				if (!name) throw new Error('PresetList[0].PresetName is missing.');
+
+				setPreset(json);
+				setPresetName(name);
+				console.log(`[client] Preset has been updated to '${name}'`);
+			} catch (err) {
+				console.error('[client] [error] Could not parse preset file.');
+				console.error(err);
+				setPreset(null);
+				setPresetName('');
+				setFileError('Selected file is not a valid HandBrake preset.');
+			}
+		};
+		reader.readAsText(file);
 	};
 
 	const handleCategoryChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -55,8 +83,14 @@ export default function UploadPreset({ socket, presets, handleClose }: Propertie
 
 	const handlePresetName = (event: React.ChangeEvent<HTMLInputElement>) => {
 		const newName = event.target.value;
-		const newPreset = preset;
-		preset!.PresetList[0].PresetName = newName;
+		if (!preset) return;
+
+		const newPreset = {
+			...preset,
+			PresetList: preset.PresetList.map((presetItem, index) =>
+				index == 0 ? { ...presetItem, PresetName: newName } : presetItem
+			),
+		};
 		setPreset(newPreset);
 		setPresetName(newName);
 	};
@@ -82,6 +116,7 @@ export default function UploadPreset({ socket, presets, handleClose }: Propertie
 						id='preset-file'
 						onChange={handlePresetFile}
 					/>
+					{fileError && <span>{fileError}</span>}
 				</div>
 				{preset && (
 					<div className={styles['fields-section']}>

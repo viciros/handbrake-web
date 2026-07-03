@@ -19,6 +19,8 @@ const capabilitiesLookup: Record<keyof WorkerCapabilities, string> = {
 const getCapabilitiesLabel = (supported: boolean) => (supported ? 'Supported' : 'Unsupported');
 
 export default function WorkerCard({ worker, info, className, ...properties }: Properties) {
+	const workerProperties = info.properties;
+
 	return (
 		<div className={`worker-card ${styles['worker-card']} ${className || ''}`} {...properties}>
 			<h3 className={styles['heading']}>{worker}</h3>
@@ -27,30 +29,37 @@ export default function WorkerCard({ worker, info, className, ...properties }: P
 					<h5 className={styles['subheading']}>Version Information</h5>
 					<div className={styles['content']}>
 						<TextInfo className={styles['text-info']} label='Application Version'>
-							{info.properties.version.application}
+							{workerProperties?.version.application || 'Loading'}
 						</TextInfo>
 						<TextInfo className={styles['text-info']} label='HandBrake Version'>
-							{info.properties.version.handbrake}
+							{workerProperties?.version.handbrake || 'Loading'}
 						</TextInfo>
 					</div>
 				</div>
 				<div className={styles['subsection']}>
 					<h5 className={styles['subheading']}>Encoding Capabilities</h5>
 					<div className={styles['content']}>
-						{(
-							Object.entries(info.properties.capabilities) as [
-								keyof WorkerCapabilities,
-								boolean
-							][]
-						).map(([capability, supported]) => (
-							<TextInfo
-								className={styles['text-info']}
-								label={capabilitiesLookup[capability]}
-								data-supported={supported}
-							>
-								{getCapabilitiesLabel(supported)}
+						{workerProperties ? (
+							(
+								Object.entries(workerProperties.capabilities) as [
+									keyof WorkerCapabilities,
+									boolean
+								][]
+							).map(([capability, supported]) => (
+								<TextInfo
+									className={styles['text-info']}
+									label={capabilitiesLookup[capability]}
+									data-supported={supported}
+									key={`${worker}-${capability}`}
+								>
+									{getCapabilitiesLabel(supported)}
+								</TextInfo>
+							))
+						) : (
+							<TextInfo className={styles['text-info']} label='Capabilities'>
+								Loading
 							</TextInfo>
-						))}
+						)}
 					</div>
 				</div>
 				<div className={styles['subsection']}>

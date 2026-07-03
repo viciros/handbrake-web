@@ -29,24 +29,30 @@ export default function WorkersSection({ queue, workers, properties }: Propertie
 						const status = queue.find((job) => job.worker_id == worker.workerID)
 							? 'Working'
 							: 'Idle';
+						const workerProperties = properties[worker.workerID];
 
 						return (
-							<tr key={`worker-${worker}`}>
+							<tr key={`worker-${worker.workerID}`}>
 								<td>{worker.workerID}</td>
 								<td align='center'>
-									{properties[worker.workerID].version.application}
+									{workerProperties?.version.application || 'Loading'}
 								</td>
 								<td align='center'>
-									{properties[worker.workerID].version.handbrake}
+									{workerProperties?.version.handbrake || 'Loading'}
 								</td>
 								<td align='center'>
-									{Object.entries(properties[worker.workerID].capabilities)
-										.filter(([_, available]) => available)
-										.map(([capability]) => (
-											<span className={styles['capability']}>
-												{capability.toUpperCase()}
-											</span>
-										))}
+									{workerProperties
+										? Object.entries(workerProperties.capabilities)
+												.filter(([_, available]) => available)
+												.map(([capability]) => (
+													<span
+														className={styles['capability']}
+														key={`${worker.workerID}-${capability}`}
+													>
+														{capability.toUpperCase()}
+													</span>
+												))
+										: 'Loading'}
 								</td>
 								<td
 									className={`${

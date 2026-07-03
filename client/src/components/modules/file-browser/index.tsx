@@ -38,26 +38,40 @@ export default function FileBrowser({
 	const [directory, setDirectory] = useState<DirectoryType | null>(null);
 	const [isLoading, setIsLoading] = useState(true);
 	const [createNewItem, setCreateNewItem] = useState(false);
+	const [errorMessage, setErrorMessage] = useState('');
+	const socketAckTimeoutMs = 10000;
 
 	const requestDirectory = async (path: string, isRecursive: boolean = false) => {
 		setIsLoading(true);
+		setErrorMessage('');
 		console.log(`[client] Requesting directory ${path}...`);
 		const request: DirectoryRequestType = {
 			path: path,
 			isRecursive: isRecursive,
 		};
-		const response: DirectoryType = await socket.emitWithAck('get-directory', request);
-		console.log(
-			`[client] Received directory ${response.current.path} with ${response.items.length} items.`
-		);
-		setIsLoading(false);
-		setDirectory(response);
-		return response;
+		try {
+			const response: DirectoryType = await socket
+				.timeout(socketAckTimeoutMs)
+				.emitWithAck('get-directory', request);
+			console.log(
+				`[client] Received directory ${response.current.path} with ${response.items.length} items.`
+			);
+			setDirectory(response);
+			return response;
+		} catch (err) {
+			console.error(`[client] [error] Could not load directory '${path}'.`);
+			console.error(err);
+			setErrorMessage('Unable to load directory.');
+			return null;
+		} finally {
+			setIsLoading(false);
+		}
 	};
 
 	useEffect(() => {
 		async function InitDirectory() {
 			const newDirectory = await requestDirectory(currentPath);
+			if (!newDirectory) return;
 			if (mode == FileBrowserMode.Directory && !selectedItem) {
 				setSelectedItem(newDirectory.current);
 			}
@@ -65,9 +79,12 @@ export default function FileBrowser({
 		InitDirectory();
 	}, []);
 
-	const handleUpdateDirectory = (newPath: string) => {
-		requestDirectory(newPath);
-		setCurrentPath(newPath);
+	const handleUpdateDirectory = async (newPath: string) => {
+		const newDirectory = await requestDirectory(newPath);
+		if (!newDirectory) return;
+
+		setCurrentPath(newDirectory.current.path);
+		setSelectedItem(mode == FileBrowserMode.Directory ? newDirectory.current : undefined);
 	};
 
 	const selectedFileLabel =
@@ -91,10 +108,18 @@ export default function FileBrowser({
 			path: currentPath,
 			name: directoryName,
 		};
-		const result = await socket.emitWithAck('make-directory', request);
-		setCreateNewItem(false);
-		if (result) {
-			requestDirectory(currentPath);
+		try {
+			const result = await socket
+				.timeout(socketAckTimeoutMs)
+				.emitWithAck('make-directory', request);
+			setCreateNewItem(false);
+			if (result) {
+				requestDirectory(currentPath);
+			}
+		} catch (err) {
+			console.error(`[client] [error] Could not create directory '${directoryName}'.`);
+			console.error(err);
+			setErrorMessage('Unable to create directory.');
 		}
 	};
 
@@ -116,6 +141,7 @@ export default function FileBrowser({
 				<div className={styles['current-path']}>
 					<span>{currentPath}</span>
 					{isLoading && <span> (Loading...)</span>}
+					{errorMessage && <span> ({errorMessage})</span>}
 				</div>
 				{mode == FileBrowserMode.Directory && allowCreate && (
 					<button

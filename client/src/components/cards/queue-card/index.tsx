@@ -27,6 +27,14 @@ interface Properties extends HTMLAttributes<HTMLDivElement> {
 	handleDrop: () => void;
 }
 
+const queueDragDataType = 'application/x-handbrake-web-job';
+
+type QueueDragData = {
+	id: string;
+	index: number;
+	category: string;
+};
+
 export default function QueueCard({
 	id,
 	job,
@@ -66,6 +74,28 @@ export default function QueueCard({
 		job.transcode_stage == TranscodeStage.Stopped ||
 		job.worker_id == null;
 
+	const getDragData = (event: React.DragEvent<HTMLDivElement>) => {
+		const rawData =
+			event.dataTransfer.getData(queueDragDataType) ||
+			event.dataTransfer.getData('text/plain');
+		if (!rawData) return null;
+
+		try {
+			const data = JSON.parse(rawData) as Partial<QueueDragData>;
+			if (
+				typeof data.id != 'string' ||
+				typeof data.index != 'number' ||
+				typeof data.category != 'string'
+			) {
+				return null;
+			}
+
+			return data as QueueDragData;
+		} catch {
+			return null;
+		}
+	};
+
 	const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
 		setDraggedID(jobID);
 		setDraggedInitialIndex(job.order_index);
@@ -74,7 +104,9 @@ export default function QueueCard({
 			index: index,
 			category: categoryID,
 		};
-		event.dataTransfer.setData('text/plain', JSON.stringify(data));
+		const serializedData = JSON.stringify(data);
+		event.dataTransfer.setData(queueDragDataType, serializedData);
+		event.dataTransfer.setData('text/plain', serializedData);
 	};
 
 	const handleDragEnd = (_event: React.DragEvent<HTMLDivElement>) => {
@@ -85,15 +117,13 @@ export default function QueueCard({
 	};
 
 	const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-		if (
-			showDragHandles &&
-			JSON.parse(event.dataTransfer.getData('text/plain')).category == categoryID
-		) {
+		const dragData = getDragData(event);
+		if (showDragHandles && dragData?.category == categoryID) {
 			event.preventDefault();
 
 			const thisJobIndex = job.order_index;
 			const thisArrayIndex = parseInt(event.currentTarget.id);
-			const draggedArrayIndex = JSON.parse(event.dataTransfer.getData('text/plain')).index;
+			const draggedArrayIndex = dragData.index;
 			const indexOffset = thisJobIndex - thisArrayIndex;
 
 			const thisPosition =

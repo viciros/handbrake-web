@@ -12,7 +12,7 @@ export default function StatusSection({ workerInfo }: Properties) {
 	return (
 		<Section className={styles['status-section']} heading='Status'>
 			{Object.entries(workerInfo).map(([worker, info]) => (
-				<WorkerCard worker={worker} info={info} />
+				<WorkerCard worker={worker} info={info} key={`worker-${worker}`} />
 			))}
 		</Section>
 	);
