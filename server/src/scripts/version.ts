@@ -1,17 +1,15 @@
+import { GetApplicationVersion } from '@handbrake-web/shared/scripts/version';
 import { type GithubReleaseResponseType } from '@handbrake-web/shared/types/version';
 import { compare } from 'compare-versions';
-import { readFileSync } from 'fs';
 import { access, readFile, rm, writeFile } from 'fs/promises';
 import logger from 'logging';
-import path, { resolve } from 'path';
-import { cwd } from 'process';
+import path from 'path';
 import { GetConfig } from './config/config';
 import { getDataPath } from './data';
 import { DatabaseSelectStatusByID, DatabaseUpdateStatus } from './database/database-status';
 
-const currentVersion = `v${
-	JSON.parse(readFileSync(resolve(cwd(), 'package.json'), { encoding: 'utf-8' })).version
-}`;
+const repositoryReleaseApi = 'https://api.github.com/repos/viciros/handbrake-web/releases';
+const currentVersion = `v${GetApplicationVersion().replace(/^v/, '')}`;
 
 const currentReleaseInfoPath = path.join(getDataPath(), 'version-info.json');
 const latestReleaseInfoPath = path.join(getDataPath(), 'update-info.json');
@@ -62,14 +60,10 @@ export async function CheckForVersionUpdate() {
 	try {
 		logger.info(`[version] Checking if there is an application update...`);
 
-		const latestReleaseURL =
-			'https://api.github.com/repos/thenickoftime/handbrake-web/releases/latest';
+		const latestReleaseURL = `${repositoryReleaseApi}/latest`;
 
 		// Fetch latest release information, timeout occurs after 5 seconds
-		const abortController = new AbortController();
-		const timeout = setTimeout(() => abortController.abort(), 5000);
-		const request = await fetch(latestReleaseURL, { signal: abortController.signal });
-		clearTimeout(timeout);
+		const request = await FetchWithTimeout(latestReleaseURL);
 		const response = (await request.json()) as GithubReleaseResponseType;
 
 		const latestVersion = response.name;
@@ -89,9 +83,10 @@ export async function CheckForVersionUpdate() {
 		} else {
 			logger.info(`[version] The application is up to date.`);
 			await RemoveReleaseInfo(latestReleaseInfoPath);
+			latestReleaseInfo = null;
 		}
 
-		DatabaseUpdateStatus('last-version-update-check', Date.now());
+		await DatabaseUpdateStatus('last-version-update-check', Date.now());
 	} catch (error) {
 		logger.error(`[version] An error occurred while checking for the latest version.`);
 		console.error(error);
@@ -117,15 +112,17 @@ export async function GetCurrentReleaseInfo() {
 	try {
 		await access(currentReleaseInfoPath);
 
-		const info = (await ReadReleaseInfo(currentReleaseInfoPath))!;
-		currentReleaseInfo = info;
+		const info = await ReadReleaseInfo(currentReleaseInfoPath);
+		if (info) {
+			currentReleaseInfo = info;
 
-		if (compare(info.name, currentVersion, '=')) {
-			return currentReleaseInfo;
-		} else {
-			logger.info(
-				`[version] Release information about the current version is outdated. Fetching information about '${currentVersion}' from GitHub.`
-			);
+			if (compare(info.name, currentVersion, '=')) {
+				return currentReleaseInfo;
+			} else {
+				logger.info(
+					`[version] Release information about the current version is outdated. Fetching information about '${currentVersion}' from GitHub.`
+				);
+			}
 		}
 	} catch (error) {
 		const parsedPath = path.parse(currentReleaseInfoPath);
@@ -135,12 +132,9 @@ export async function GetCurrentReleaseInfo() {
 	}
 
 	try {
-		const currentReleaseURL = `https://api.github.com/repos/thenickoftime/handbrake-web/releases/tags/${currentVersion}`;
+		const currentReleaseURL = `${repositoryReleaseApi}/tags/${currentVersion}`;
 
-		const abortController = new AbortController();
-		const timeout = setTimeout(() => abortController.abort(), 5000);
-		const request = await fetch(currentReleaseURL, { signal: abortController.signal });
-		clearTimeout(timeout);
+		const request = await FetchWithTimeout(currentReleaseURL);
 
 		if (request.status == 404) {
 			logger.warn(
@@ -155,13 +149,24 @@ export async function GetCurrentReleaseInfo() {
 		const response = (await request.json()) as GithubReleaseResponseType;
 		currentReleaseInfo = response;
 
-		WriteReleaseInfo(currentReleaseInfoPath, response);
+		await WriteReleaseInfo(currentReleaseInfoPath, response);
 	} catch (error) {
 		logger.error(`[version] An error occurred while fetching the current release information`);
 		console.error(error);
 	}
 
 	return currentReleaseInfo;
+}
+
+async function FetchWithTimeout(url: string) {
+	const abortController = new AbortController();
+	const timeout = setTimeout(() => abortController.abort(), 5000);
+
+	try {
+		return await fetch(url, { signal: abortController.signal });
+	} finally {
+		clearTimeout(timeout);
+	}
 }
 
 async function ReadReleaseInfo(infoPath: string) {
@@ -180,7 +185,9 @@ async function ReadReleaseInfo(infoPath: string) {
 		logger.error(
 			`[version] An error occurred while reading release information from '${infoPath}'.`
 		);
-		throw error;
+		logger.error(error);
+		await RemoveReleaseInfo(infoPath);
+		return null;
 	}
 }
 

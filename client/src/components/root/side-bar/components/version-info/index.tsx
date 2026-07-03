@@ -13,21 +13,34 @@ type Params = {
 export default function VersionInfo({ socket, config }: Params) {
 	const [currentVersion, setCurrentVersion] = useState<GithubReleaseResponseType | null>(null);
 	const [latestVersion, setLatestVersion] = useState<GithubReleaseResponseType | null>(null);
+	const socketAckTimeoutMs = 10000;
 
 	const getCurrentVersionInfo = async () => {
-		const info: GithubReleaseResponseType | null = await socket.emitWithAck(
-			'get-current-version-info'
-		);
-		// console.log(info ? info.name : info);
-		setCurrentVersion(info);
+		try {
+			const info: GithubReleaseResponseType | null = await socket
+				.timeout(socketAckTimeoutMs)
+				.emitWithAck('get-current-version-info');
+			// console.log(info ? info.name : info);
+			setCurrentVersion(info);
+		} catch (err) {
+			console.error('[client] [error] Could not get current version info.');
+			console.error(err);
+			setCurrentVersion(null);
+		}
 	};
 
 	const getLatestVersionInfo = async () => {
-		const info: GithubReleaseResponseType | null = await socket.emitWithAck(
-			'get-latest-version-info'
-		);
-		// console.log(info ? info.name : info);
-		setLatestVersion(info);
+		try {
+			const info: GithubReleaseResponseType | null = await socket
+				.timeout(socketAckTimeoutMs)
+				.emitWithAck('get-latest-version-info');
+			// console.log(info ? info.name : info);
+			setLatestVersion(info);
+		} catch (err) {
+			console.error('[client] [error] Could not get latest version info.');
+			console.error(err);
+			setLatestVersion(null);
+		}
 	};
 
 	useEffect(() => {
@@ -40,7 +53,7 @@ export default function VersionInfo({ socket, config }: Params) {
 				}
 			}
 		})();
-	}, [socket.connected]);
+	}, [socket.connected, config?.application['update-check-interval']]);
 
 	return (
 		<div className={styles['version-info']}>
@@ -49,6 +62,7 @@ export default function VersionInfo({ socket, config }: Params) {
 					className={styles['current-version']}
 					href={currentVersion.html_url}
 					target='_blank'
+					rel='noreferrer'
 				>
 					{currentVersion.name}
 				</a>
@@ -60,6 +74,7 @@ export default function VersionInfo({ socket, config }: Params) {
 					className={styles['latest-version']}
 					href={latestVersion.html_url}
 					target='_blank'
+					rel='noreferrer'
 				>
 					<WarningIcon />
 					<span className='version'>{latestVersion.name}</span>
