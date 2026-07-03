@@ -18,8 +18,10 @@ import {
 	DatabaseGetDetailedJobByID,
 	DatabaseGetDetailedJobs,
 	DatabaseGetSimpleJobByID,
+	DatabaseClaimWaitingJob,
 	DatabaseInsertJob,
 	DatabaseInsertJobOrderByID,
+	DatabaseReleaseClaimedJob,
 	DatabaseRemoveJobByID,
 	DatabaseUpdateJobOrderIndex,
 	DatabaseUpdateJobStatus,
@@ -27,6 +29,16 @@ import {
 import { DatabaseSelectStatusByID, DatabaseUpdateStatus } from './database/database-status';
 import { GetDefaultPresetByName, GetPresetByName } from './presets';
 import { GetWorkerProperties } from './properties';
+import { AssertPathInMediaRoots } from './path-safety';
+
+type StartTranscodeAck =
+	| number
+	| {
+			ok: boolean;
+			jobID?: number;
+			currentJobID?: number | null;
+			error?: string;
+	  };
 
 const getJobRequiredCapability: (
 	encoder: HandbrakePresetDataType['VideoEncoder']
@@ -46,11 +58,11 @@ export async function InitializeQueue() {
 	switch (GetConfig().application['queue-startup-behavior']) {
 		case QueueStartupBehavior.Active:
 			logger.info(`[server] [queue] Initializating the queue state to 'Active'.`);
-			SetQueueStatus(QueueStatus.Idle);
+			await SetQueueStatus(QueueStatus.Idle);
 			break;
 		case QueueStartupBehavior.Stopped:
 			logger.info(`[server] [queue] Initializating the queue state to 'Stopped'.`);
-			SetQueueStatus(QueueStatus.Stopped);
+			await SetQueueStatus(QueueStatus.Stopped);
 			break;
 		case QueueStartupBehavior.Previous:
 		default:
@@ -61,7 +73,7 @@ export async function InitializeQueue() {
 				);
 				EmitToAllClients('queue-status-update', status);
 			} else {
-				SetQueueStatus(QueueStatus.Stopped);
+				await SetQueueStatus(QueueStatus.Stopped);
 				logger.error(
 					`[server] [queue] The queue status does not exist in the database, initializing to the state 'stopped'.`
 				);
@@ -71,19 +83,19 @@ export async function InitializeQueue() {
 
 	// Queue Data
 	const queue = await DatabaseGetDetailedJobs();
-	queue.forEach((job) => {
+	for (const job of queue) {
 		if (
 			job.worker_id != null ||
 			job.transcode_stage == TranscodeStage.Scanning ||
 			job.transcode_stage == TranscodeStage.Transcoding
 		) {
-			DatabaseUpdateJobStatus(job.job_id, { transcode_stage: TranscodeStage.Unknown });
+			await DatabaseUpdateJobStatus(job.job_id, { transcode_stage: TranscodeStage.Unknown });
 
 			logger.info(
 				`[server] [queue] Job '${job.job_id}' was loaded from the database in an unfinished state. The job's state will be updated to 'Unknown'.`
 			);
 		}
-	});
+	}
 	EmitToAllClients('queue-update', queue);
 }
 
@@ -112,8 +124,8 @@ export function GetEligibleWorkers(
 ) {
 	const eligibleWorkers = availableWorkers.filter((worker) => {
 		const workerID = GetWorkerID(worker);
-		const workerCapabilities = GetWorkerProperties()[workerID].capabilities;
-		return workerCapabilities[requiredCapability];
+		const workerCapabilities = GetWorkerProperties()[workerID]?.capabilities;
+		return workerCapabilities ? workerCapabilities[requiredCapability] : false;
 	});
 
 	return eligibleWorkers;
@@ -135,6 +147,8 @@ export function GetEligibleJobs(
 		const jobPreset = job.preset_category.match(/Default:\s/)
 			? GetDefaultPresetByName(job.preset_category.replace(/Default:\s/, ''), job.preset_id)
 			: GetPresetByName(job.preset_category, job.preset_id);
+
+		if (!jobPreset?.PresetList?.[0]?.VideoEncoder) return false;
 
 		const requiredCapability = getJobRequiredCapability(jobPreset.PresetList[0].VideoEncoder);
 
@@ -163,9 +177,9 @@ export async function JobForAvailableWorkers(jobID: number) {
 		if (eligibleWorkers.length > 0) {
 			const selectedWorker = eligibleWorkers[0];
 			const job = await DatabaseGetDetailedJobByID(jobID);
-			await StartJob(job, selectedWorker);
+			const didStart = await StartJob(job, selectedWorker);
 			if ((await GetQueueStatus()) != QueueStatus.Active) {
-				SetQueueStatus(QueueStatus.Active);
+				await SetQueueStatus(didStart ? QueueStatus.Active : QueueStatus.Idle);
 			}
 			logger.info(
 				`[server] [queue] Found worker with ID '${GetWorkerID(
@@ -199,9 +213,9 @@ export async function WorkerForAvailableJobs(workerID: string) {
 			const worker = GetWorkerWithID(workerID);
 			const selectedJob = eligibleJobs[0];
 			if (selectedJob && worker) {
-				StartJob(selectedJob, worker);
+				const didStart = await StartJob(selectedJob, worker);
 				if ((await GetQueueStatus()) != QueueStatus.Active) {
-					SetQueueStatus(QueueStatus.Active);
+					await SetQueueStatus(didStart ? QueueStatus.Active : QueueStatus.Idle);
 				}
 				logger.info(
 					`[server] [queue] Found job with ID '${selectedJob.job_id}' for worker with ID '${workerID}'.`
@@ -213,7 +227,7 @@ export async function WorkerForAvailableJobs(workerID: string) {
 			);
 			// Set queue to idle if there are no other busy workers
 			if ((await GetBusyWorkers()).length == 0) {
-				SetQueueStatus(QueueStatus.Idle);
+				await SetQueueStatus(QueueStatus.Idle);
 				logger.info("[queue] There are no active workers, setting queue to 'Idle'.");
 			}
 		} else {
@@ -222,7 +236,7 @@ export async function WorkerForAvailableJobs(workerID: string) {
 			);
 			// Set queue to idle if there are no other busy workers
 			if ((await GetBusyWorkers()).length == 0) {
-				SetQueueStatus(QueueStatus.Idle);
+				await SetQueueStatus(QueueStatus.Idle);
 				logger.info("[queue] There are no active workers, setting queue to 'Idle'.");
 			}
 		}
@@ -235,8 +249,8 @@ export async function GetQueueStatus() {
 	return status;
 }
 
-export function SetQueueStatus(newState: QueueStatus) {
-	DatabaseUpdateStatus('queue', newState);
+export async function SetQueueStatus(newState: QueueStatus) {
+	await DatabaseUpdateStatus('queue', newState);
 	EmitToAllClients('queue-status-update', newState);
 }
 
@@ -261,18 +275,20 @@ export async function StartQueue(clientID?: string) {
 					logger.info(
 						`[queue] Assigning worker with ID '${workerID}' to job with id '${selectedJob.job_id}'.`
 					);
-					StartJob(selectedJob, worker);
+					const didStart = await StartJob(selectedJob, worker);
 
 					// Remove job from available jobs for the next iteration
-					availableJobs.splice(availableJobs.indexOf(selectedJob), 1);
+					if (didStart) {
+						availableJobs.splice(availableJobs.indexOf(selectedJob), 1);
 
-					SetQueueStatus(QueueStatus.Active);
+						await SetQueueStatus(QueueStatus.Active);
+					}
 				} else if (availableJobs.length > 0 && eligibleJobs.length == 0) {
 					logger.info(
 						`[queue] There are available jobs, but none that require the capabilities of worker with ID '${workerID}'.`
 					);
 					if ((await GetBusyWorkers()).length == 0) {
-						SetQueueStatus(QueueStatus.Idle);
+						await SetQueueStatus(QueueStatus.Idle);
 						logger.info(
 							"[queue] There are no active workers, setting queue to 'Idle'."
 						);
@@ -283,7 +299,7 @@ export async function StartQueue(clientID?: string) {
 					);
 					// Set queue to idle if there are no other busy workers
 					if ((await GetBusyWorkers()).length == 0) {
-						SetQueueStatus(QueueStatus.Idle);
+						await SetQueueStatus(QueueStatus.Idle);
 						logger.info(
 							"[queue] There are no active workers, setting queue to 'Idle'."
 						);
@@ -299,7 +315,7 @@ export async function StartQueue(clientID?: string) {
 export async function StopQueue(clientID?: string) {
 	if ((await GetQueueStatus()) != QueueStatus.Stopped) {
 		const newStatus = QueueStatus.Stopped;
-		SetQueueStatus(newStatus);
+		await SetQueueStatus(newStatus);
 
 		const stoppedBy = clientID ? `client '${clientID}'` : 'the server.';
 
@@ -322,6 +338,9 @@ export async function UpdateQueue() {
 
 // Job Actions -------------------------------------------------------------------------------------
 export async function AddJob(data: AddJobType) {
+	AssertPathInMediaRoots(data.input_path, 'job input');
+	AssertPathInMediaRoots(data.output_path, 'job output');
+
 	const job = await DatabaseInsertJob(data);
 	if (job) {
 		await UpdateQueue();
@@ -332,18 +351,42 @@ export async function AddJob(data: AddJobType) {
 export async function StartJob(job: DetailedJobType, worker: Worker) {
 	const workerID = GetWorkerID(worker);
 
-	const returnedJobID: number = await worker.emitWithAck('start-transcode', job.job_id);
-	if (returnedJobID == job.job_id) {
+	const didClaim = await DatabaseClaimWaitingJob(job.job_id, workerID);
+	if (!didClaim) {
+		logger.warn(
+			`[queue] [warn] Job '${job.job_id}' was already claimed before worker '${workerID}' could start it.`
+		);
+		return false;
+	}
+
+	try {
+		const ack: StartTranscodeAck = await worker
+			.timeout(15000)
+			.emitWithAck('start-transcode', job.job_id);
+		const didStart =
+			typeof ack == 'number' ? ack == job.job_id : ack.ok && ack.jobID == job.job_id;
+
+		if (!didStart) {
+			throw new Error(
+				typeof ack == 'number'
+					? `Worker reported current job '${ack}'.`
+					: ack.error || `Worker reported current job '${ack.currentJobID}'.`
+			);
+		}
+
 		logger.info(`[queue] Worker '${workerID}' has started work on job '${job.job_id}'.`);
 		await DatabaseUpdateJobStatus(job.job_id, {
 			worker_id: workerID,
 			time_started: new Date().getTime(),
 		});
-	} else {
+		return true;
+	} catch (err) {
 		logger.warn(
-			`[queue] [warn] Worker '${workerID}' is busy with another job and cannot start work on job '${job.job_id}'. Checking for available workers again...`
+			`[queue] [warn] Worker '${workerID}' could not start job '${job.job_id}'. Releasing the claim.`
 		);
-		await JobForAvailableWorkers(job.job_id);
+		logger.warn(err);
+		await DatabaseReleaseClaimedJob(job.job_id, workerID);
+		return false;
 	}
 }
 
@@ -354,8 +397,16 @@ export async function StopJob(job_id: number, isError: boolean = false) {
 		// Tell the worker to stop transcoding
 		const worker = job.worker_id;
 		if (worker) {
-			if (GetWorkerWithID(worker)) {
-				EmitToWorkerWithID(worker, 'stop-transcode', job_id);
+			const workerSocket = GetWorkerWithID(worker);
+			if (workerSocket) {
+				try {
+					await workerSocket.timeout(15000).emitWithAck('stop-transcode', job_id);
+				} catch (err) {
+					logger.warn(
+						`[queue] [warn] Worker '${worker}' did not acknowledge stop for job '${job_id}'.`
+					);
+					logger.warn(err);
+				}
 			}
 		}
 
@@ -375,7 +426,7 @@ export async function StopJob(job_id: number, isError: boolean = false) {
 		});
 		await UpdateQueue();
 		if (worker) {
-			WorkerForAvailableJobs(worker);
+			await WorkerForAvailableJobs(worker);
 		}
 	} catch (err) {
 		logger.error(`Could not stop the job with id '${job_id}'.`);
@@ -414,6 +465,15 @@ export async function ResetJob(job_id: number) {
 }
 
 export async function RemoveJob(job_id: number) {
+	const job = await DatabaseGetDetailedJobByID(job_id);
+	if (
+		job.transcode_stage == TranscodeStage.Scanning ||
+		job.transcode_stage == TranscodeStage.Transcoding ||
+		job.transcode_stage == TranscodeStage.Unknown
+	) {
+		throw new Error(`Cannot remove active job '${job_id}'. Stop it first.`);
+	}
+
 	await DatabaseRemoveJobByID(job_id);
 	await RemoveJobLogByID(job_id);
 	await UpdateQueue();

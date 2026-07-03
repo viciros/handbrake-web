@@ -269,6 +269,46 @@ export async function DatabaseUpdateJob(job_id: number, data: UpdateJobType) {
 	}
 }
 
+export async function DatabaseClaimWaitingJob(job_id: number, worker_id: string) {
+	try {
+		const result = await database
+			.updateTable('jobs_status')
+			.set({ worker_id })
+			.where('job_id', '=', job_id)
+			.where('worker_id', 'is', null)
+			.where('transcode_stage', '=', TranscodeStage.Waiting)
+			.executeTakeFirstOrThrow();
+
+		const didClaim = Number(result.numUpdatedRows) > 0;
+		if (didClaim) {
+			logger.info(`[database] Worker '${worker_id}' claimed waiting job '${job_id}'.`);
+		}
+
+		return didClaim;
+	} catch (err) {
+		logger.error(`[database] [error] Could not claim waiting job '${job_id}'.`);
+		throw err;
+	}
+}
+
+export async function DatabaseReleaseClaimedJob(job_id: number, worker_id: string) {
+	try {
+		const result = await database
+			.updateTable('jobs_status')
+			.set({ worker_id: null, transcode_stage: TranscodeStage.Waiting })
+			.where('job_id', '=', job_id)
+			.where('worker_id', '=', worker_id)
+			.executeTakeFirstOrThrow();
+
+		logger.info(`[database] Released job '${job_id}' from worker '${worker_id}'.`);
+
+		return result;
+	} catch (err) {
+		logger.error(`[database] [error] Could not release claimed job '${job_id}'.`);
+		throw err;
+	}
+}
+
 export async function DatabaseUpdateJobStatus(job_id: number, status: UpdateJobStatusType) {
 	try {
 		const previousStatus = await DatabaseEnsureJobStatusByID(job_id);

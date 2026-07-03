@@ -48,6 +48,7 @@ import {
 	StartQueue,
 	StopJob,
 } from './queue';
+import { AssertPathInMediaRoots } from './path-safety';
 
 const watchers: { [index: number]: FSWatcher } = [];
 
@@ -75,6 +76,11 @@ function FindMatchingWatcherJob(
 }
 
 export function RegisterWatcher(watcher: DetailedWatcherType) {
+	AssertPathInMediaRoots(watcher.watch_path, 'watch path');
+	if (watcher.output_path) {
+		AssertPathInMediaRoots(watcher.output_path, 'watcher output path');
+	}
+
 	const newWatcher = chokidar.watch(watcher.watch_path, {
 		awaitWriteFinish: true,
 		ignoreInitial: true,
@@ -105,6 +111,10 @@ export function RegisterWatcher(watcher: DetailedWatcherType) {
 export async function DeregisterWatcher(id: number) {
 	try {
 		// logger.info(watchers);
+		if (!watchers[id]) {
+			logger.info(`[server] [watcher] Watcher '${id}' is not registered.`);
+			return;
+		}
 		const directory = Object.entries(watchers[id].getWatched())[0].join('/');
 		await watchers[id].close();
 		logger.info(`[server] [watcher] Deregistered watcher for '${directory}'.`);
@@ -120,7 +130,14 @@ export async function InitializeWatchers() {
 	const watchers = await DatabaseGetDetailedWatchers();
 
 	for await (const watcher of watchers) {
-		RegisterWatcher(watcher);
+		try {
+			RegisterWatcher(watcher);
+		} catch (err) {
+			logger.error(
+				`[server] [watcher] [error] Watcher '${watcher.watcher_id}' could not be registered.`
+			);
+			logger.error(err);
+		}
 	}
 }
 
@@ -418,6 +435,11 @@ export async function UpdateWatchers() {
 }
 
 export async function AddWatcher(watcher: AddWatcherType) {
+	AssertPathInMediaRoots(watcher.watch_path, 'watch path');
+	if (watcher.output_path) {
+		AssertPathInMediaRoots(watcher.output_path, 'watcher output path');
+	}
+
 	const result = await DatabaseInsertWatcher(watcher);
 	RegisterWatcher({ ...result, rules: [] });
 	await UpdateWatchers();

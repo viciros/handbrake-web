@@ -99,7 +99,7 @@ export default function WorkerSocket(io: Server) {
 				logger.info(
 					`[socket] Disconnected worker '${workerID}' was working on job '${workersJob.job_id}' when disconnected - setting job to 'unknown'.`
 				);
-				DatabaseUpdateJobStatus(workersJob.job_id, {
+				await DatabaseUpdateJobStatus(workersJob.job_id, {
 					transcode_stage: TranscodeStage.Unknown,
 				});
 			}
@@ -147,7 +147,7 @@ export default function WorkerSocket(io: Server) {
 			});
 			await UpdateQueue();
 			if ((await GetBusyWorkers()).length == 0) {
-				SetQueueStatus(QueueStatus.Idle);
+				await SetQueueStatus(QueueStatus.Idle);
 				logger.info("[queue] There are no active workers, setting queue to 'Idle'.");
 			}
 

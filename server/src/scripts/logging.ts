@@ -1,7 +1,8 @@
 import { CreateRotatingFileLogger } from '@handbrake-web/shared/logger';
-import { readdir, rm, writeFile } from 'fs/promises';
+import { mkdir, readdir, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import { cwd } from 'process';
+import { IsSubPath, SanitizePathSegment } from './path-safety';
 
 export const logPath = path.join(process.env.DATA_PATH || path.join(cwd(), '../data'), 'log');
 
@@ -11,7 +12,21 @@ export default logger;
 
 export async function WriteWorkerLogToFile(workerID: string, logName: string, logContents: string) {
 	try {
-		const newLogPath = path.join(logPath, logName);
+		const maxLogSizeBytes = parseInt(process.env.HANDBRAKE_MAX_WORKER_LOG_BYTES || '10485760');
+		const logSizeBytes = Buffer.byteLength(logContents, 'utf-8');
+
+		if (logSizeBytes > maxLogSizeBytes) {
+			throw new Error(`Worker log '${logName}' is ${logSizeBytes} bytes, above the limit.`);
+		}
+
+		await mkdir(logPath, { recursive: true });
+
+		const safeLogName = SanitizePathSegment(path.basename(logName));
+		const newLogPath = path.resolve(logPath, safeLogName);
+		if (!IsSubPath(logPath, newLogPath)) {
+			throw new Error(`Worker log path '${newLogPath}' escapes '${logPath}'.`);
+		}
+
 		await writeFile(newLogPath, logContents);
 		logger.info(
 			`[log] Log file from worker '${workerID}' has been written to '${newLogPath}'.`

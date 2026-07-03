@@ -45,12 +45,14 @@ export async function RunMigrations(migrator: Migrator, sqlite: Database) {
 export async function SkipToLatestMigration(migrator: Migrator) {
 	const migrations = (await migrator.getMigrations()).map(({ name }) => name);
 
-	for await (const migration of migrations) {
-		database
-			.insertInto('migrations')
-			.values({ name: migration, timestamp: new Date().toISOString() })
-			.execute();
-	}
+	await database.transaction().execute(async (trx) => {
+		for await (const migration of migrations) {
+			await trx
+				.insertInto('migrations')
+				.values({ name: migration, timestamp: new Date().toISOString() })
+				.execute();
+		}
+	});
 
 	logger.info(
 		`[database] [migration] Marking all migrations up to '${migrations.at(-1)}' as completed.`

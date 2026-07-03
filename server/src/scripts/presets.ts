@@ -11,6 +11,7 @@ import path from 'path';
 import { env } from 'process';
 import { EmitToAllClients } from './connections';
 import { getDataPath } from './data';
+import { JoinUnderRoot, SanitizePathSegment } from './path-safety';
 
 const defaultPresetsPath = env.DEFAULT_PRESETS_PATH || '/var/lib/handbrake/preset_builtin.json';
 export const presetsPath = path.join(getDataPath(), '/presets');
@@ -23,6 +24,13 @@ const presetFileToPresetObject = async (path: string) => {
 	const presetObject: HandbrakePresetType = JSON.parse(presetData);
 
 	return presetObject;
+};
+
+const getPresetPath = (category: string, presetName: string) => {
+	const safePresetName = `${SanitizePathSegment(presetName)}.json`;
+	return category != 'uncategorized'
+		? JoinUnderRoot(presetsPath, SanitizePathSegment(category), safePresetName)
+		: JoinUnderRoot(presetsPath, safePresetName);
 };
 
 const presetFilesToPresetObject = async (presetPath: string) => {
@@ -180,17 +188,22 @@ export async function LoadPresets() {
 
 export async function WritePreset(fileName: string, category: string, preset: HandbrakePresetType) {
 	try {
-		const categoryPath = path.join(presetsPath, category);
-		try {
-			await access(categoryPath);
-		} catch {
-			await mkdir(categoryPath);
-			logger.info(
-				`[server] [presets] Creating directory for category '${category}' at '${categoryPath}'.`
-			);
+		const categoryPath =
+			category != 'uncategorized'
+				? JoinUnderRoot(presetsPath, SanitizePathSegment(category))
+				: presetsPath;
+		if (category != 'uncategorized') {
+			try {
+				await access(categoryPath);
+			} catch {
+				await mkdir(categoryPath);
+				logger.info(
+					`[server] [presets] Creating directory for category '${category}' at '${categoryPath}'.`
+				);
+			}
 		}
 
-		const presetPath = path.join(categoryPath, fileName + '.json');
+		const presetPath = getPresetPath(category, fileName);
 		const presetData = JSON.stringify(preset, null, 2);
 		await writeFile(presetPath, presetData);
 		logger.info(`[server] [presets] Wrote preset '${fileName}' to '${presetPath}'.`);
@@ -242,10 +255,7 @@ export async function AddPreset(newPreset: HandbrakePresetType, category: string
 
 export async function RemovePreset(presetName: string, category: string) {
 	try {
-		const presetPath =
-			category != 'uncategorized'
-				? path.join(presetsPath, category, presetName + '.json')
-				: path.join(presetsPath, presetName + '.json');
+		const presetPath = getPresetPath(category, presetName);
 
 		await rm(presetPath);
 		delete presets[category][presetName];
@@ -260,22 +270,16 @@ export async function RemovePreset(presetName: string, category: string) {
 
 export async function RenamePreset(oldName: string, newName: string, category: string) {
 	try {
-		presets[category][newName] = presets[category][oldName];
-		presets[category][newName].PresetList[0].PresetName = newName;
-		delete presets[category][oldName];
+		const oldPath = getPresetPath(category, oldName);
+		const newPath = getPresetPath(category, newName);
+		const renamedPreset = JSON.parse(JSON.stringify(presets[category][oldName])) as HandbrakePresetType;
+		renamedPreset.PresetList[0].PresetName = newName;
 
-		const oldPath = path.join(
-			presetsPath,
-			category != 'uncategorized' ? category : '',
-			oldName + '.json'
-		);
-		const newPath = path.join(
-			presetsPath,
-			category != 'uncategorized' ? category : '',
-			newName + '.json'
-		);
 		await rm(oldPath);
-		await writeFile(newPath, JSON.stringify(presets[category][newName], null, 2));
+		await writeFile(newPath, JSON.stringify(renamedPreset, null, 2));
+
+		presets[category][newName] = renamedPreset;
+		delete presets[category][oldName];
 
 		logger.info(
 			`[server] [presets] The preset '${oldName}' has been renamed to '${newName}' at the path '${newPath}'`

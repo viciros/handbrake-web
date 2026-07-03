@@ -25,7 +25,10 @@ export function AddClient(client: Client) {
 }
 
 export function RemoveClient(client: Client) {
-	connections.clients.splice(connections.clients.indexOf(client));
+	const index = connections.clients.indexOf(client);
+	if (index >= 0) {
+		connections.clients.splice(index, 1);
+	}
 	updateConnections();
 }
 
@@ -39,12 +42,15 @@ export function AddWorker(worker: Worker) {
 }
 
 export function RemoveWorker(worker: Worker) {
-	connections.workers.splice(connections.workers.indexOf(worker));
+	const index = connections.workers.indexOf(worker);
+	if (index >= 0) {
+		connections.workers.splice(index, 1);
+	}
 	updateConnections();
 }
 
 export function DisconnectAllWorkerConnections() {
-	connections.workers.forEach((worker) => worker.disconnect);
+	connections.workers.forEach((worker) => worker.disconnect(true));
 }
 
 export function GetWorkers() {

@@ -7,32 +7,41 @@ import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import fs from 'fs/promises';
 import logger from 'logging';
 import path from 'path';
+import { AssertDirectoryNameSafe, AssertPathInMediaRoots, IsPathInMediaRoots } from './path-safety';
 import { GetQueue } from './queue';
 
 export async function GetDirectoryItems(absolutePath: string, recursive: boolean = false) {
 	try {
+		const safePath = AssertPathInMediaRoots(absolutePath, 'directory');
+
 		// Get directory
-		const dir = await fs.readdir(absolutePath, {
+		const dir = await fs.readdir(safePath, {
 			encoding: 'utf-8',
 			withFileTypes: true,
 			recursive: recursive,
 		});
+		const maxDirectoryItems = parseInt(process.env.HANDBRAKE_MAX_DIRECTORY_ITEMS || '5000');
+		if (dir.length > maxDirectoryItems) {
+			throw new Error(
+				`Directory '${safePath}' has ${dir.length} items, above the limit ${maxDirectoryItems}.`
+			);
+		}
 
 		// Make parent item
-		const parentPath = path.resolve(absolutePath, '..');
+		const parentPath = path.resolve(safePath, '..');
 		const parentItem: DirectoryItemType | undefined =
-			parentPath == absolutePath
+			parentPath == safePath || !IsPathInMediaRoots(parentPath)
 				? undefined
 				: {
 						path: parentPath,
-						name: path.dirname(parentPath),
+						name: path.basename(parentPath) || parentPath,
 						isDirectory: true,
 				  };
 
 		// Make current item
 		const currentItem: DirectoryItemType = {
-			path: absolutePath,
-			name: path.dirname(absolutePath),
+			path: safePath,
+			name: path.basename(safePath) || safePath,
 			isDirectory: true,
 		};
 
@@ -63,14 +72,20 @@ export async function GetDirectoryItems(absolutePath: string, recursive: boolean
 
 export async function MakeDirectory(directoryPath: string, directoryName: string) {
 	try {
+		const safeDirectoryPath = AssertPathInMediaRoots(directoryPath, 'directory');
+		const safeDirectoryName = AssertDirectoryNameSafe(directoryName);
+
 		// Check if the program has write permissions in the parent dir
-		await fs.access(directoryPath, fs.constants.W_OK);
+		await fs.access(safeDirectoryPath, fs.constants.W_OK);
 
 		// Get parent directory permissions to copy to new directory
-		const parentMode = (await fs.stat(directoryPath)).mode;
+		const parentMode = (await fs.stat(safeDirectoryPath)).mode;
 
 		// Make new directory
-		const fullPath = path.join(directoryPath, directoryName);
+		const fullPath = AssertPathInMediaRoots(
+			path.join(safeDirectoryPath, safeDirectoryName),
+			'new directory'
+		);
 		await fs.mkdir(fullPath, { mode: parentMode, recursive: false });
 		return true;
 	} catch (err) {
@@ -80,8 +95,13 @@ export async function MakeDirectory(directoryPath: string, directoryName: string
 }
 
 export async function CheckFilenameCollision(existingDir: string, newItems: DirectoryItemsType) {
+	AssertPathInMediaRoots(existingDir, 'output directory');
 	const directory = await GetDirectoryItems(existingDir);
 	const existingItems = directory ? directory.items : [];
+	const queue = await GetQueue();
+	const waitingOutputPaths = queue
+		.filter((job) => job.transcode_stage == TranscodeStage.Waiting)
+		.map((job) => job.output_path);
 	const fileCollisions: { [index: string]: number[] } = {};
 
 	newItems.forEach((newItem, newItemIndex) => {
@@ -121,13 +141,10 @@ export async function CheckFilenameCollision(existingDir: string, newItems: Dire
 					);
 					return;
 				}
-			});
+		});
 
 		// Check for collisions against waiting jobs in the queue (files don't exist yet)
-		Object.values(GetQueue())
-			.filter((job) => job.status.transcode_stage == TranscodeStage.Waiting)
-			.map((job) => job.data.output_path)
-			.forEach((waitingItem) => {
+		waitingOutputPaths.forEach((waitingItem) => {
 				if (
 					waitingItem == newItem.path &&
 					!fileCollisions[newItem.name].includes(newItemIndex)
@@ -153,9 +170,8 @@ export async function CheckFilenameCollision(existingDir: string, newItems: Dire
 				existingItems
 					.map((existingItem) => existingItem.name + existingItem.extension)
 					.includes(renamedItem.name + `_${fileIndex}` + renamedItem.extension) ||
-				Object.values(GetQueue())
-					.filter((job) => job.status.transcode_stage == TranscodeStage.Waiting)
-					.map((job) => path.basename(job.data.output_path))
+				waitingOutputPaths
+					.map((outputPath) => path.basename(outputPath))
 					.includes(renamedItem.name + `_${fileIndex}` + renamedItem.extension) ||
 				renamedItems.map((item) => item.name).includes(renamedItem.name + `_${fileIndex}`)
 			) {

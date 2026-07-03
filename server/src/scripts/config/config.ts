@@ -37,6 +37,47 @@ export const configFilePath = path.join(getDataPath(), 'config.yaml');
 // Initialize configuration with defaults
 let config = JSON.parse(JSON.stringify(defaultConfig)) as ConfigType;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value == 'object' && value != null && !Array.isArray(value);
+
+const isQueueStartupBehavior = (value: unknown): value is QueueStartupBehavior =>
+	typeof value == 'number' &&
+	Object.values(QueueStartupBehavior)
+		.filter((entry) => typeof entry == 'number')
+		.includes(value);
+
+function ValidateConfig(value: UnknownConfigType): ConfigType {
+	if (!isRecord(value.config) || typeof value.config.version != 'number') {
+		throw new Error("Config section 'config.version' must be a number.");
+	}
+	if (
+		!isRecord(value.paths) ||
+		typeof value.paths['media-path'] != 'string' ||
+		typeof value.paths['input-path'] != 'string' ||
+		typeof value.paths['output-path'] != 'string'
+	) {
+		throw new Error("Config section 'paths' is invalid.");
+	}
+	if (
+		!isRecord(value.presets) ||
+		typeof value.presets['show-default-presets'] != 'boolean' ||
+		typeof value.presets['allow-preset-creator'] != 'boolean'
+	) {
+		throw new Error("Config section 'presets' is invalid.");
+	}
+	if (
+		!isRecord(value.application) ||
+		!isQueueStartupBehavior(value.application['queue-startup-behavior']) ||
+		typeof value.application['update-check-interval'] != 'number' ||
+		!Number.isFinite(value.application['update-check-interval']) ||
+		value.application['update-check-interval'] < 1
+	) {
+		throw new Error("Config section 'application' is invalid.");
+	}
+
+	return value as ConfigType;
+}
+
 async function InitializeConfig() {
 	const configData = stringify(defaultConfig);
 
@@ -67,7 +108,7 @@ export async function LoadConfig() {
 			await RunMigrations(defaultConfig.config.version);
 		}
 
-		const configFile = (await ReadConfigFile()) as ConfigType;
+		const configFile = ValidateConfig(await ReadConfigFile());
 		config = configFile;
 
 		EmitToAllClients('config-update', config);
@@ -77,22 +118,24 @@ export async function LoadConfig() {
 			`[server] [config] [error] Could not load the config file from '${configFilePath}'. The application will now shut down.`
 		);
 		logger.error(error);
-		// process.exit();
+		throw error;
 	}
 }
 
 export async function WriteConfig(newConfig: ConfigType) {
 	try {
-		const fileData = stringify(newConfig);
+		const validatedConfig = ValidateConfig(newConfig);
+		const fileData = stringify(validatedConfig);
 		await writeFile(configFilePath, fileData);
 
-		config = newConfig;
+		config = validatedConfig;
 
-		EmitToAllClients('config-update', newConfig);
+		EmitToAllClients('config-update', validatedConfig);
 		logger.info(`[server] [config] The config file at '${configFilePath}' has been written.`);
 	} catch (error) {
 		logger.error(`[server] [config] [error] Could not write new config to file.`);
 		logger.error(error);
+		throw error;
 	}
 }
 
