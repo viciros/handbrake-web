@@ -2,7 +2,7 @@ ARG DISTROLESS_VARIANT=debug-nonroot
 ARG HANDBRAKE_BUILD_TAG=latest
 
 # HandBrake Build ----------------------------------------------------------------------------------
-FROM ghcr.io/thenickoftime/handbrake-build:${HANDBRAKE_BUILD_TAG} AS handbrake-build
+FROM ghcr.io/viciros/handbrake-build:${HANDBRAKE_BUILD_TAG} AS handbrake-build
 
 # Build Worker -------------------------------------------------------------------------------------
 FROM node:24-trixie-slim AS worker-build

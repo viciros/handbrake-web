@@ -1,4 +1,4 @@
-Due to the way the build process for this project works, it was very easy for me to create a plain containerized wrapper for HandBrakeCLI, so I did. You can access it via `ghcr.io/thenickoftime/handbrake-cli`.
+Due to the way the build process for this project works, it was very easy for me to create a plain containerized wrapper for HandBrakeCLI, so I did. You can access it via `ghcr.io/viciros/handbrake-cli`.
 
 ## What does it do?
 
@@ -11,17 +11,17 @@ You can use it almost exactly as you would use natively installed HandBrakeCLI -
 ##### Basic Example
 
 ```bash
-docker run --rm ghcr.io/thenickoftime/handbrake-cli:latest --help
+docker run --rm ghcr.io/viciros/handbrake-cli:latest --help
 ```
 
-This command is essentially equivalent to `HandBrakeCLI --help` if it were natively installed. The first part `docker run --rm ghcr.io/thenickoftime/handbrake-cli:latest` are the arguments for running the docker image, and everything after it (just `--help` in this case), are arguments passed to HandBrakeCLI. The container will run the command once, and then remove itself afterwards (`--rm` argument).
+This command is essentially equivalent to `HandBrakeCLI --help` if it were natively installed. The first part `docker run --rm ghcr.io/viciros/handbrake-cli:latest` are the arguments for running the docker image, and everything after it (just `--help` in this case), are arguments passed to HandBrakeCLI. The container will run the command once, and then remove itself afterwards (`--rm` argument).
 
 If you are new to/learning `HandBrakeCLI`, this command is incredibly helpful for understanding what your options are.
 
 ##### Realistic Example
 
 ```bash
-docker run --rm --user 1000:1000 -v ./video:/video ghcr.io/thenickoftime/handbrake-cli:latest -i /video/Input/video.mov -o /video/Output/video.mkv -Z "H.265 MKV 480p30"
+docker run --rm --user 1000:1000 -v ./video:/video ghcr.io/viciros/handbrake-cli:latest -i /video/Input/video.mov -o /video/Output/video.mkv -Z "H.265 MKV 480p30"
 
 ```
 
@@ -41,7 +41,7 @@ docker run --rm \
 	--user 1000:1000 \
 	--device /dev/dri:/dev/dri \
 	-v ./video:/video \
-	ghcr.io/thenickoftime/handbrake-cli:latest \
+	ghcr.io/viciros/handbrake-cli:latest \
 	-i /video/Input/video.mov \
 	-o /video/Output/video.mkv \
 	-Z "H.265 QSV 1080p"

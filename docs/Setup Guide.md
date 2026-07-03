@@ -31,28 +31,28 @@ HandBrake Web has three Docker Compose configuration file templates available:
 
 | Configuation File                                                                                           | Description                                                     |
 | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| [compose.base.yaml](https://github.com/TheNickOfTime/handbrake-web/blob/main/compose/compose.base.yaml)     | Basic configuration for CPU encoding                            |
-| [compose.intel.yaml](https://github.com/TheNickOfTime/handbrake-web/blob/main/compose/compose.intel.yaml)   | Modified configuration for Intel QSV support for Intel GPUs     |
-| [compose.nvidia.yaml](https://github.com/TheNickOfTime/handbrake-web/blob/main/compose/compose.nvidia.yaml) | Modified configuration for NVIDIA NVENC support for NVIDIA GPUs |
+| [compose.base.yaml](https://github.com/viciros/handbrake-web/blob/main/compose/compose.base.yaml)     | Basic configuration for CPU encoding                            |
+| [compose.intel.yaml](https://github.com/viciros/handbrake-web/blob/main/compose/compose.intel.yaml)   | Modified configuration for Intel QSV support for Intel GPUs     |
+| [compose.nvidia.yaml](https://github.com/viciros/handbrake-web/blob/main/compose/compose.nvidia.yaml) | Modified configuration for NVIDIA NVENC support for NVIDIA GPUs |
 
 You can either copy/paste the contents of these files into a file called `compose.yaml`, or run the following commands to download the templates directly to your current directory. All of these templates will guide you to deploy a single server instance, and a single worker instance - both running on the same machine.
 
 ##### Base
 
 ```bash
-wget -O compose.yaml https://raw.githubusercontent.com/TheNickOfTime/handbrake-web/refs/heads/main/compose/compose.base.yaml
+wget -O compose.yaml https://raw.githubusercontent.com/viciros/handbrake-web/refs/heads/main/compose/compose.base.yaml
 ```
 
 ##### Intel
 
 ```bash
-wget -O compose.yaml https://raw.githubusercontent.com/TheNickOfTime/handbrake-web/refs/heads/main/compose/compose.intel.yaml
+wget -O compose.yaml https://raw.githubusercontent.com/viciros/handbrake-web/refs/heads/main/compose/compose.intel.yaml
 ```
 
 ##### NVIDIA
 
 ```bash
-wget -O compose.yaml https://raw.githubusercontent.com/TheNickOfTime/handbrake-web/refs/heads/main/compose/compose.nvidia.yaml
+wget -O compose.yaml https://raw.githubusercontent.com/viciros/handbrake-web/refs/heads/main/compose/compose.nvidia.yaml
 ```
 
 ### Step 2 - Modify `compose.yaml` Template
@@ -88,21 +88,35 @@ volumes:
 
 HandBrake Web expects paths to be mapped to `/data` and `/video` on the server, and `/video` on workers. Please update the left-hand side of these mappings to reflect where you wish to have application data stored. It is _not recommended_ to store this data relative to your compose file.
 
-The same media must be mapped to `/video` across the server and _all_ worker instances. See [here](https://github.com/TheNickOfTime/handbrake-web/wiki/about-volume-mapping) for more information.
+The same media must be mapped to `/video` across the server and _all_ worker instances. See [here](https://github.com/viciros/handbrake-web/wiki/about-volume-mapping) for more information.
 
 #### `environment` Variables
+
+In your server configuration, ensure the following environment variables are properly configured:
+
+```yaml
+environment:
+  - HANDBRAKE_WEB_USERNAME=admin
+  - HANDBRAKE_WEB_PASSWORD=change-this-password
+  - HANDBRAKE_WORKER_SECRET=change-this-worker-secret
+```
+
+- `HANDBRAKE_WEB_USERNAME` & `HANDBRAKE_WEB_PASSWORD` - These credentials are required to access the web interface.
+- `HANDBRAKE_WORKER_SECRET` - This shared secret is required for workers to authenticate with the server.
+
+In your worker configuration, ensure the following environment variables are properly configured:
 
 ```yaml
 environment:
   - WORKER_ID=handbrake-worker
   - SERVER_URL=handbrake-server
   - SERVER_PORT=9999
+  - HANDBRAKE_WORKER_SECRET=change-this-worker-secret
 ```
-
-In your worker configuration, ensure the following environment variables are properly configured:
 
 - `WORKER_ID` - This must be unique and not used by any other worker connected to your server.
 - `SERVER_URL` & `SERVER_PORT` - If your worker is not on the same host device as your server, you will need to change these to reflect external access. Prefix with `https://` if using TLS/SSL.
+- `HANDBRAKE_WORKER_SECRET` - This must match the server's `HANDBRAKE_WORKER_SECRET`.
 
 ### Step 3 - Start Containers
 
@@ -118,7 +132,7 @@ This will first pull the images (based on the tag `latest`), then start the cont
 
 #### Hardware Encoding Support
 
-Please see the wiki page on [Hardware Acceleration](https://github.com/TheNickOfTime/handbrake-web/wiki/hardware-acceleration) for more information.
+Please see the wiki page on [Hardware Acceleration](https://github.com/viciros/handbrake-web/wiki/hardware-acceleration) for more information.
 
 #### Reverse Proxy
 

@@ -68,6 +68,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{ is_default_branch }}
             type=raw,value=${{ env.HANDBRAKE_VERSION }},enable={{ is_default_branch }}
+            type=ref,event=branch
             type=ref,event=pr            
 
       - name: Build and push Docker image
@@ -127,6 +128,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{ is_default_branch }}
             type=raw,value=${{ env.HANDBRAKE_VERSION }},enable={{ is_default_branch }}
+            type=ref,event=branch
             type=ref,event=pr
 
       - name: Build and push Docker image
@@ -141,6 +143,6 @@ jobs:
           push: true
           build-args: |
             DISTROLESS_VARIANT=${{ github.head_ref == '' && 'nonroot' || 'debug-nonroot' }}
-            HANDBRAKE_BUILD_TAG=${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || 'latest'}}
+            HANDBRAKE_BUILD_TAG=${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

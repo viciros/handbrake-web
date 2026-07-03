@@ -52,7 +52,7 @@ services:
 
 ### Preset Configutation
 
-The HandBrake [docs](https://handbrake.fr/docs/en/latest/technical/video-qsv.html) and the Intel Media Driver [readme](https://github.com/intel/media-driver#known-issues-and-limitations) indicate that certain GPUs will have issues encoding with QSV due to "low power mode" unless "HuC firmware" has been configured. I haven't figured out the HuC firmware stuff yet ([related issue](https://github.com/TheNickOfTime/handbrake-web/issues/513)), so if your QSV encodes are failing without clear cause, you can do **one** of the following:
+The HandBrake [docs](https://handbrake.fr/docs/en/latest/technical/video-qsv.html) and the Intel Media Driver [readme](https://github.com/intel/media-driver#known-issues-and-limitations) indicate that certain GPUs will have issues encoding with QSV due to "low power mode" unless "HuC firmware" has been configured. I haven't figured out the HuC firmware stuff yet ([related issue](https://github.com/viciros/handbrake-web/issues/513)), so if your QSV encodes are failing without clear cause, you can do **one** of the following:
 
 - Add `lowpower=0` to your preset's "Advanced Options" on the "video" tab within HandBrake's GUI.
 - Add `"VideoOptionExtra": "lowpower=0",` to the alphabetically appropriate location within your preset's `.json` file.

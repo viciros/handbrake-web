@@ -1,20 +1,20 @@
 <div align='center'>
     <h1 style='{text-decoration: none}'>Contributing to HandBrake Web</h1>
     <div align='center'>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/blob/main/LICENSE'>
-        <img alt="GitHub License" src="https://img.shields.io/github/license/thenickoftime/handbrake-web?style=flat-square">
+      <a href='https://github.com/viciros/handbrake-web/blob/main/LICENSE'>
+        <img alt="GitHub License" src="https://img.shields.io/github/license/viciros/handbrake-web?style=flat-square">
       </a>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/releases/latest'>
-        <img alt="GitHub Release" src="https://img.shields.io/github/v/release/thenickoftime/handbrake-web?style=flat-square">
+      <a href='https://github.com/viciros/handbrake-web/releases/latest'>
+        <img alt="GitHub Release" src="https://img.shields.io/github/v/release/viciros/handbrake-web?style=flat-square">
       </a>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/milestone/5'>
-        <img alt="GitHub package.json version" src="https://img.shields.io/github/package-json/v/thenickoftime/handbrake-web?filename=server%2Fpackage.json&style=flat-square&label=development&color=goldenrod">
+      <a href='https://github.com/viciros/handbrake-web/milestone/5'>
+        <img alt="GitHub package.json version" src="https://img.shields.io/github/package-json/v/viciros/handbrake-web?filename=server%2Fpackage.json&style=flat-square&label=development&color=goldenrod">
       </a>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/milestone/5'>
-        <img alt="GitHub milestone details" src="https://img.shields.io/github/milestones/progress-percent/thenickoftime/handbrake-web/5?style=flat-square&label=progress&color=goldenrod">
+      <a href='https://github.com/viciros/handbrake-web/milestone/5'>
+        <img alt="GitHub milestone details" src="https://img.shields.io/github/milestones/progress-percent/viciros/handbrake-web/5?style=flat-square&label=progress&color=goldenrod">
       </a>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/actions/workflows/docker-publish.yaml?query=branch%3Amain'>
-        <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/thenickoftime/handbrake-web/docker-publish.yaml?branch=main&style=flat-square">
+      <a href='https://github.com/viciros/handbrake-web/actions/workflows/docker-publish.yaml?query=branch%3Amain'>
+        <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/viciros/handbrake-web/docker-publish.yaml?branch=main&style=flat-square">
       </a>
     </div>
     <div align='center'>
@@ -28,13 +28,13 @@
 
 ### Did you find a bug?
 
-First, check if your issue already exists [here](https://github.com/TheNickOfTime/handbrake-web/issues?q=is%3Aissue%20label%3Atype%2Fbug). Be sure to check closed issues as well - issues may be fixed in development and have not seen a release yet!
+First, check if your issue already exists [here](https://github.com/viciros/handbrake-web/issues?q=is%3Aissue%20label%3Atype%2Fbug). Be sure to check closed issues as well - issues may be fixed in development and have not seen a release yet!
 
 If your bug doesn't have an issue, go ahead and open a new one. Please use the _Bug Report_ issue template and fill out all possible information.
 
 ### Do you have a feature/improvement request?
 
-First, check if your feature/improvement has already been made/requested [here](https://github.com/TheNickOfTime/handbrake-web/issues?q=is%3Aissue%20label%3Atype%2Ffeature%20label%3Atype%2Fimprovement).
+First, check if your feature/improvement has already been made/requested [here](https://github.com/viciros/handbrake-web/issues?q=is%3Aissue%20label%3Atype%2Ffeature%20label%3Atype%2Fimprovement).
 
 If your feature/improvement request doesn't already have an issue, go ahead and open a new one. Please use the _Feature Request_ issue template and fill out all possible information.
 
