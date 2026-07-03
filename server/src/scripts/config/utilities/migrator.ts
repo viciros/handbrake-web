@@ -47,7 +47,9 @@ export async function RunMigrations(latestVersion: number) {
 		);
 
 		logger.info(
-			`[config] [migration] There are ${neededMigrations.length} config migrations to process.`
+			`[config] [migration] There are ${
+				Object.keys(neededMigrations).length
+			} config migrations to process.`
 		);
 
 		// Run each migration
@@ -56,7 +58,9 @@ export async function RunMigrations(latestVersion: number) {
 		}
 
 		logger.info(
-			`[config] [migration] Successfully completed ${neededMigrations.length} migrations.`
+			`[config] [migration] Successfully completed ${
+				Object.keys(neededMigrations).length
+			} migrations.`
 		);
 	} else {
 		logger.info(`[config] [migration] The config file's schema (v${version}) is up to date.`);
@@ -79,7 +83,7 @@ async function RunMigration(name: string, migration: Migration) {
 			encoding: 'utf-8',
 		});
 
-		logger.info(`[config] [migration] Successfully completed '${name}'..`);
+		logger.info(`[config] [migration] Successfully completed '${name}'.`);
 	} catch (err) {
 		logger.error(`[config] [migration] Could not complete '${name}'.`);
 		throw err;

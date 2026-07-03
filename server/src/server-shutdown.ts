@@ -7,23 +7,32 @@ import {
 } from 'scripts/connections';
 import { DatabaseDisconnect } from 'scripts/database/database';
 
+let shutdownInProgress = false;
+
 export function RegisterExitListeners(socket: SocketServer) {
 	process.on('SIGINT', () => {
 		logger.info(
 			`[server] [shutdown] The process has been interrupted, HandBrake Web will now begin to shutdown...`
 		);
-		Shutdown(socket);
+		void Shutdown(socket);
 	});
 
 	process.on('SIGTERM', () => {
 		logger.info(
 			`[server] [shutdown] The process has been terminated, HandBrake Web will now begin to shutdown...`
 		);
-		Shutdown(socket);
+		void Shutdown(socket);
 	});
 }
 
 export default async function Shutdown(socket: SocketServer) {
+	if (shutdownInProgress) {
+		logger.info(`[server] [shutdown] Shutdown is already in progress.`);
+		return;
+	}
+
+	shutdownInProgress = true;
+
 	try {
 		// Close all client and worker connections
 		logger.info(`[shutdown] Closing all socket connections...`);
@@ -31,9 +40,12 @@ export default async function Shutdown(socket: SocketServer) {
 		DisconnectAllWorkerConnections();
 
 		// Shutdown the socket server
-		await new Promise<void>((resolve) => {
+		await new Promise<void>((resolve, reject) => {
 			socket.close((err) => {
-				if (err) throw err;
+				if (err) {
+					reject(err);
+					return;
+				}
 				resolve();
 			});
 		});
