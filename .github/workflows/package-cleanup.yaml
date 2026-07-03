@@ -9,40 +9,46 @@ on:
   push:
     paths:
       - '.github/workflows/package-cleanup.yaml'
+      - '.github/scripts/cleanup-ghcr-versions.sh'
+
+env:
+  PACKAGE_NAMES: handbrake-web-server handbrake-web-worker handbrake-build handbrake-cli
 
 jobs:
   cleanup-packages:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.repository.default_branch || github.sha }}
+
       - name: Clean Old PR's 'pr-*' Versions
         if: github.event_name == 'workflow_run' || github.event_name == 'push'
-        uses: snok/container-retention-policy@v3.1.0
-        with:
-          account: user
-          token: ${{ secrets.GITHUB_TOKEN }}
-          image-names: handbrake-web-server handbrake-web-worker handbrake-build handbrake-cli
-          tag-selection: tagged
-          image-tags: 'pr-*'
-          cut-off: 1w
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          TAG_REGEX: '^pr-[0-9]+$'
+          MAX_AGE_SECONDS: 604800
+        run: bash .github/scripts/cleanup-ghcr-versions.sh
+
       - name: Clean This PR's 'pr-*' Versions
         if: github.event_name == 'pull_request'
-        uses: snok/container-retention-policy@v3.1.0
-        with:
-          account: user
-          token: ${{ secrets.GITHUB_TOKEN }}
-          image-names: handbrake-web-server handbrake-web-worker handbrake-build handbrake-cli
-          tag-selection: tagged
-          image-tags: 'pr-${{github.event.number}}'
-          cut-off: 0s
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          TAG_REGEX: '^pr-${{ github.event.number }}$'
+          MAX_AGE_SECONDS: 0
+        run: bash .github/scripts/cleanup-ghcr-versions.sh
+
       - name: Clean 'sha256-*' Versions
         if: github.event_name == 'workflow_run' || github.event_name == 'push'
-        uses: snok/container-retention-policy@v3.1.0
-        with:
-          account: user
-          token: ${{ secrets.GITHUB_TOKEN }}
-          image-names: handbrake-web-server handbrake-web-worker handbrake-build handbrake-cli
-          tag-selection: tagged
-          image-tags: 'sha256-*'
-          cut-off: 0s
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          TAG_REGEX: '^sha256-.*$'
+          MAX_AGE_SECONDS: 0
+        run: bash .github/scripts/cleanup-ghcr-versions.sh
