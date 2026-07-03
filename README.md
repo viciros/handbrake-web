@@ -64,7 +64,7 @@ If you are very familiar with Docker/Docker Compose and want to get started as f
 ```yaml
 services:
   handbrake-server:
-    image: ghcr.io/thenickoftime/handbrake-web-server:latest
+    image: ghcr.io/viciros/handbrake-web-server:latest
     container_name: handbrake-web-server
     user: 1000:1000 # edit to run as user (uuid:guid) with permissions to access your media. 0:0 to run as root (not recommended).
     ports:
@@ -74,7 +74,7 @@ services:
       - /path/to/your/media:/video # ensure this path is the same across all containers
 
   handbrake-worker:
-    image: ghcr.io/thenickoftime/handbrake-web-worker:latest
+    image: ghcr.io/viciros/handbrake-web-worker:latest
     container_name: handbrake-web-worker
     user: 1000:1000 # edit to run as user (uuid:guid) with permissions to access your media. 0:0 to run as root (not recommended).
     environment:
@@ -123,7 +123,7 @@ _These lists are not comprehensive, please see the [project repository](https://
 
 ## Bonus Tool (Minimal HandBrakeCLI Image)
 
-If you are looking for a dockerized/containerized way to directly use HandBrakeCLI (via terminal), you can use an additional image this project provides -`ghcr.io/thenickoftime/handbrake-cli`. You can find additional information about using it on the [HandBrakeCLI Image](https://github.com/viciros/handbrake-web/wiki/HandBrakeCLI-Image) wiki page.
+If you are looking for a dockerized/containerized way to directly use HandBrakeCLI (via terminal), you can use an additional image this project provides -`ghcr.io/viciros/handbrake-cli`. You can find additional information about using it on the [HandBrakeCLI Image](https://github.com/viciros/handbrake-web/wiki/HandBrakeCLI-Image) wiki page.
 
 This "bonus" image was incredibly simple to make by using the existing outputs of this project's build process, so it felt rude to not make it available to anyone who might want to use it.
 
