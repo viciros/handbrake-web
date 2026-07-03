@@ -69,6 +69,19 @@ export async function DatabaseGetSimpleJobByID(job_id: number) {
 	}
 }
 
+export async function DatabaseGetSimpleJobByIDOrUndefined(job_id: number) {
+	try {
+		const job = await selectFromJobsSimple
+			.where('job_id', '=', job_id)
+			.selectAll()
+			.executeTakeFirst();
+		return job;
+	} catch (err) {
+		logger.error(`[database] [error] Could not get data for '${job_id}' from the jobs table.`);
+		throw err;
+	}
+}
+
 export async function DatabaseGetJobStatusByID(job_id: number) {
 	try {
 		const status = await selectFromJobsStatus
@@ -83,6 +96,54 @@ export async function DatabaseGetJobStatusByID(job_id: number) {
 		);
 		throw err;
 	}
+}
+
+export async function DatabaseGetJobStatusByIDOrUndefined(job_id: number) {
+	try {
+		const status = await selectFromJobsStatus
+			.where('job_id', '=', job_id)
+			.selectAll()
+			.executeTakeFirst();
+		return status;
+	} catch (err) {
+		logger.error(
+			`[database] [error] Could not get the status for '${job_id}' from the jobs_status table.`
+		);
+		throw err;
+	}
+}
+
+export async function DatabaseEnsureJobStatusByID(job_id: number, worker_id?: string) {
+	const existingStatus = await DatabaseGetJobStatusByIDOrUndefined(job_id);
+
+	if (existingStatus) {
+		return existingStatus;
+	}
+
+	const existingJob = await DatabaseGetSimpleJobByIDOrUndefined(job_id);
+
+	if (!existingJob) {
+		return undefined;
+	}
+
+	await database
+		.insertInto('jobs_status')
+		.values({
+			job_id,
+			worker_id: worker_id ?? null,
+			transcode_stage: TranscodeStage.Unknown,
+			transcode_percentage: 0,
+			transcode_eta: 0,
+			transcode_fps_current: 0,
+			transcode_fps_average: 0,
+			time_started: 0,
+			time_finished: 0,
+		})
+		.executeTakeFirstOrThrow();
+
+	logger.warn(`[database] [warn] Recreated missing jobs_status row for job '${job_id}'.`);
+
+	return await DatabaseGetJobStatusByID(job_id);
 }
 
 export async function DatabaseGetJobOrderIndexByID(job_id: number) {
@@ -105,30 +166,38 @@ export async function DatabaseGetJobOrderIndexByID(job_id: number) {
 
 export async function DatabaseInsertJob(values: AddJobType) {
 	try {
-		// Insert new row into the jobs table
-		const newJob = await database
-			.insertInto('jobs')
-			.values(values)
-			.returning('job_id')
-			.executeTakeFirstOrThrow();
+		const { job_id, nextIndex } = await database.transaction().execute(async (trx) => {
+			const newJob = await trx
+				.insertInto('jobs')
+				.values(values)
+				.returning('job_id')
+				.executeTakeFirstOrThrow();
 
-		// Insert a blank row into the jobs_status table
-		await database
-			.insertInto('jobs_status')
-			.values({ job_id: newJob.job_id })
-			.executeTakeFirstOrThrow();
+			await trx
+				.insertInto('jobs_status')
+				.values({ job_id: newJob.job_id })
+				.executeTakeFirstOrThrow();
 
-		// Insert a new row into the jobs_order table
-		const nextIndex = await getNextOrderIndex();
-		await database
-			.insertInto('jobs_order')
-			.values({ job_id: newJob.job_id, order_index: nextIndex })
-			.executeTakeFirstOrThrow();
+			const maxOrderIndex = (
+				await trx
+					.selectFrom('jobs_order')
+					.select(({ fn }) => fn.max('order_index').as('max'))
+					.executeTakeFirstOrThrow()
+			).max;
+			const nextIndex = Number(maxOrderIndex ?? 0) + 1;
+
+			await trx
+				.insertInto('jobs_order')
+				.values({ job_id: newJob.job_id, order_index: nextIndex })
+				.executeTakeFirstOrThrow();
+
+			return { job_id: newJob.job_id, nextIndex };
+		});
 
 		logger.info(
-			`[database] Inserted a new job with id '${newJob.job_id}' into the database at order index '${nextIndex}'.`
+			`[database] Inserted a new job with id '${job_id}' into the database at order index '${nextIndex}'.`
 		);
-		return newJob.job_id;
+		return job_id;
 	} catch (err) {
 		logger.error(
 			`[database] [error] Could not insert job with input file '${values.input_path}' into jobs table.`
@@ -175,16 +244,22 @@ export async function DatabaseUpdateJob(job_id: number, data: UpdateJobType) {
 
 export async function DatabaseUpdateJobStatus(job_id: number, status: UpdateJobStatusType) {
 	try {
-		if (status.transcode_stage) {
-			const previousStatus = await DatabaseGetJobStatusByID(job_id);
+		const previousStatus = await DatabaseEnsureJobStatusByID(job_id);
 
-			if (previousStatus.transcode_stage != status.transcode_stage) {
-				logger.info(
-					`[database] Status for job with id '${job_id}' has changed from '${
-						TranscodeStage[previousStatus.transcode_stage]
-					}' to '${TranscodeStage[status.transcode_stage]}'.`
-				);
-			}
+		if (!previousStatus) {
+			logger.warn(`[database] [warn] Ignoring status update for deleted job '${job_id}'.`);
+			return;
+		}
+
+		if (
+			status.transcode_stage !== undefined &&
+			previousStatus.transcode_stage != status.transcode_stage
+		) {
+			logger.info(
+				`[database] Status for job with id '${job_id}' has changed from '${
+					TranscodeStage[previousStatus.transcode_stage]
+				}' to '${TranscodeStage[status.transcode_stage]}'.`
+			);
 		}
 
 		const result = await database

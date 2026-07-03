@@ -57,7 +57,7 @@ export async function InitializeDatabaseTables() {
 			.createTable('jobs_status')
 			.ifNotExists()
 			.addColumn('job_id', 'integer', (col) =>
-				col.notNull().references('jobs.job_id').onDelete('cascade')
+				col.notNull().primaryKey().references('jobs.job_id').onDelete('cascade')
 			)
 			.addColumn('worker_id', 'text')
 			.addColumn('transcode_stage', 'integer', (col) => col.defaultTo(0))
@@ -75,7 +75,7 @@ export async function InitializeDatabaseTables() {
 			.createTable('jobs_order')
 			.ifNotExists()
 			.addColumn('job_id', 'integer', (col) =>
-				col.notNull().references('jobs.job_id').onDelete('cascade')
+				col.notNull().unique().references('jobs.job_id').onDelete('cascade')
 			)
 			.addColumn('order_index', 'integer', (col) => col.notNull().unique())
 			.execute();

@@ -6,7 +6,7 @@ import type { WorkerProperties } from '@handbrake-web/shared/types/worker';
 import logger, { logPath, WriteWorkerLogToFile } from 'logging';
 import { AddWorker, RemoveWorker } from 'scripts/connections';
 import {
-	DatabaseGetJobStatusByID,
+	DatabaseEnsureJobStatusByID,
 	DatabaseGetSimpleJobByID,
 	DatabaseUpdateJobOrderIndex,
 	DatabaseUpdateJobStatus,
@@ -36,18 +36,35 @@ export default function WorkerSocket(io: Server) {
 		logger.info(`[socket] Worker properties = ${JSON.stringify(properties, null, 2)}`);
 
 		logger.info(`[socket] Checking worker '${workerID}' for an existing job in progress...`);
-		const existingJobID = await socket.emitWithAck('check-for-existing-job');
+		const existingJobID: number | null = await socket.emitWithAck('check-for-existing-job');
+		let workerCanTakeNewJob = false;
+
 		if (existingJobID) {
 			logger.info(`[socket] Worker '${workerID}' is busy with job '${existingJobID}'.`);
 
-			const workerJob = await DatabaseGetJobStatusByID(existingJobID);
-			if (
+			const workerJob = await DatabaseEnsureJobStatusByID(existingJobID, workerID);
+
+			if (!workerJob) {
+				logger.warn(
+					`[socket] [warn] Worker '${workerID}' reported job '${existingJobID}', but that job no longer exists in the server database. Stopping the worker's stale transcode state.`
+				);
+
+				try {
+					await socket.timeout(15000).emitWithAck('stop-transcode', existingJobID);
+					workerCanTakeNewJob = true;
+				} catch (err) {
+					logger.error(
+						`[socket] [error] Worker '${workerID}' did not acknowledge stop-transcode for stale job '${existingJobID}'.`
+					);
+					logger.error(err);
+				}
+			} else if (
 				workerJob.worker_id != workerID ||
 				(workerJob.transcode_stage != TranscodeStage.Scanning &&
 					workerJob.transcode_stage != TranscodeStage.Transcoding)
 			) {
 				logger.warn(
-					`[socket] [warn] The server's information about job '${workerJob.job_id}' is out of date. Setting the job's worker and to the state 'Unknown' until we hear back from the worker again.`
+					`[socket] [warn] The server's information about job '${workerJob.job_id}' is out of date. Setting the job's worker and state to 'Unknown' until we hear back from the worker again.`
 				);
 				await DatabaseUpdateJobStatus(existingJobID, {
 					worker_id: workerID,
@@ -56,7 +73,11 @@ export default function WorkerSocket(io: Server) {
 			}
 		} else {
 			logger.info(`[socket] Worker '${workerID}' is not busy with an existing job.`);
-			WorkerForAvailableJobs(workerID);
+			workerCanTakeNewJob = true;
+		}
+
+		if (workerCanTakeNewJob) {
+			await WorkerForAvailableJobs(workerID);
 		}
 
 		socket.on('disconnect', async (reason, details) => {

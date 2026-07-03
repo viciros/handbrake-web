@@ -46,7 +46,7 @@ export interface JobsTable {
 
 // Jobs Status -------------------------------------------------------------------------
 export interface JobsStatusTable {
-	job_id: Generated<number>;
+	job_id: number;
 	worker_id: string | null;
 	transcode_stage: Generated<TranscodeStage>;
 	transcode_percentage: Generated<number>;
@@ -59,7 +59,7 @@ export interface JobsStatusTable {
 
 // Jobs Order --------------------------------------------------------------------------
 export interface JobsOrderTable {
-	job_id: Generated<number>;
+	job_id: number;
 	order_index: number;
 }
 

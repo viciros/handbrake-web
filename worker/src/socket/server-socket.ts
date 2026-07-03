@@ -61,8 +61,16 @@ export default function ServerSocket(server: Socket) {
 		callback(currentJobID || jobID);
 	});
 
-	server.on('stop-transcode', (jobID: number) => {
+	server.on('stop-transcode', async (jobID: number, callback?: () => void) => {
 		logger.info(`[socket] Request to stop transcoding the current job with id '${jobID}'.`);
-		StopTranscode(jobID, server);
+
+		try {
+			await StopTranscode(jobID, server);
+		} catch (err) {
+			logger.error(`[socket] [error] Could not stop transcoding job '${jobID}'.`);
+			logger.error(err);
+		}
+
+		callback?.();
 	});
 }
