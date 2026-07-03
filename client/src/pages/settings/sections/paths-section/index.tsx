@@ -31,15 +31,29 @@ export default function SettingsPaths({}: HTMLAttributes<HTMLElement>) {
 		setCurrentConfig({ ...currentConfig, paths: { ...currentConfig.paths, [key]: value } });
 	};
 
-	const checkPathsValid = (paths: ConfigType['paths']) => {
-		const mediaPathRegex = new RegExp(`^${paths['media-path']}`);
-		console.log(mediaPathRegex);
+	const normalizePathForCheck = (value: string) => {
+		const normalized = value.replaceAll('\\', '/').replace(/\/+/g, '/').replace(/\/$/, '');
+		return normalized || '/';
+	};
 
-		const inputPathValid = paths['input-path'].match(mediaPathRegex);
-		const outputPathValid = paths['output-path'].match(mediaPathRegex);
+	const isPathUnderRoot = (root: string, value: string) => {
+		const normalizedRoot = normalizePathForCheck(root);
+		const normalizedValue = normalizePathForCheck(value);
+
+		return (
+			(normalizedRoot == '/' && normalizedValue.startsWith('/')) ||
+			normalizedValue == normalizedRoot ||
+			normalizedValue.startsWith(`${normalizedRoot}/`)
+		);
+	};
+
+	const checkPathsValid = (paths: ConfigType['paths']) => {
+		const inputPathValid = isPathUnderRoot(paths['media-path'], paths['input-path']);
+		const outputPathValid =
+			!paths['output-path'] || isPathUnderRoot(paths['media-path'], paths['output-path']);
 		const newValidPaths = {
-			'input-path': inputPathValid ? true : false,
-			'output-path': outputPathValid || !paths['output-path'] ? true : false,
+			'input-path': inputPathValid,
+			'output-path': outputPathValid,
 		};
 
 		setPathsValid(Object.values(newValidPaths).every((value) => value));

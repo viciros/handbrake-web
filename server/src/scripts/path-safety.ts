@@ -17,7 +17,7 @@ export function IsSubPath(parent: string, child: string) {
 
 export function GetMediaRoots() {
 	const config = GetConfig();
-	const roots = [getVideoPath(), config.paths['media-path']]
+	const roots = [config.paths['media-path'] || getVideoPath()]
 		.filter((value): value is string => typeof value == 'string' && value.length > 0)
 		.map(normalizePath);
 
