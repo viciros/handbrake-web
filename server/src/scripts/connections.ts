@@ -58,11 +58,15 @@ export function GetWorkers() {
 }
 
 export function GetWorkerIDs() {
-	return connections.workers.map((worker) => worker.id);
+	return connections.workers.map((worker) => GetWorkerID(worker));
 }
 
 export function GetWorkerWithID(id: string) {
 	return connections.workers.find((worker) => GetWorkerID(worker) == id);
+}
+
+export function HasWorkerWithID(id: string) {
+	return GetWorkerWithID(id) != undefined;
 }
 
 export function GetWorkerID(worker: Worker) {

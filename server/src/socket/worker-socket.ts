@@ -1,19 +1,23 @@
-import type { JobStatusType, JobType } from '@handbrake-web/shared/types/database';
+import type {
+	JobType,
+	UpdateJobStatusType,
+} from '@handbrake-web/shared/types/database';
 import { type HandbrakePresetType } from '@handbrake-web/shared/types/preset';
 import { QueueStatus } from '@handbrake-web/shared/types/queue';
 import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import type { WorkerProperties } from '@handbrake-web/shared/types/worker';
 import logger, { logPath, WriteWorkerLogToFile } from 'logging';
 import { AuthenticateWorkerSocket } from 'scripts/auth';
-import { AddWorker, RemoveWorker } from 'scripts/connections';
+import { AddWorker, HasWorkerWithID, RemoveWorker } from 'scripts/connections';
 import {
 	DatabaseEnsureJobStatusByID,
+	DatabaseGetJobStatusByIDOrUndefined,
 	DatabaseGetSimpleJobByID,
 	DatabaseUpdateJobOrderIndex,
 	DatabaseUpdateJobStatus,
 } from 'scripts/database/database-queue';
 import { GetDefaultPresetByName, GetPresetByName } from 'scripts/presets';
-import { AddWorkerProperties } from 'scripts/properties';
+import { AddWorkerProperties, RemoveWorkerProperties } from 'scripts/properties';
 import {
 	GetBusyWorkers,
 	GetQueue,
@@ -24,6 +28,8 @@ import {
 } from 'scripts/queue';
 import { Server } from 'socket.io';
 
+const workerAckTimeoutMs = 15000;
+
 export default function WorkerSocket(io: Server) {
 	const namespace = io.of('/worker');
 	namespace.use(AuthenticateWorkerSocket);
@@ -31,83 +37,144 @@ export default function WorkerSocket(io: Server) {
 	namespace.on('connection', async (socket) => {
 		const workerID = socket.handshake.query['workerID'] as string;
 
+		if (HasWorkerWithID(workerID)) {
+			logger.warn(
+				`[socket] [warn] Rejected duplicate worker connection for worker ID '${workerID}' with socket ID '${socket.id}'.`
+			);
+			socket.disconnect(true);
+			return;
+		}
+
 		logger.info(`[socket] Worker '${workerID}' has connected with ID '${socket.id}'.`);
-		AddWorker(socket);
 
-		logger.info(`[socket] Getting worker '${workerID}' properties...`);
-		const properties: WorkerProperties = await socket.emitWithAck('get-properties');
-		AddWorkerProperties(workerID, properties);
-		logger.info(`[socket] Worker properties = ${JSON.stringify(properties, null, 2)}`);
+		let didCleanup = false;
+		const cleanupWorker = async (reason: string, details?: unknown) => {
+			if (didCleanup) return;
+			didCleanup = true;
 
-		logger.info(`[socket] Checking worker '${workerID}' for an existing job in progress...`);
-		const existingJobID: number | null = await socket.emitWithAck('check-for-existing-job');
-		let workerCanTakeNewJob = false;
-
-		if (existingJobID) {
-			logger.info(`[socket] Worker '${workerID}' is busy with job '${existingJobID}'.`);
-
-			const workerJob = await DatabaseEnsureJobStatusByID(existingJobID, workerID);
-
-			if (!workerJob) {
-				logger.warn(
-					`[socket] [warn] Worker '${workerID}' reported job '${existingJobID}', but that job no longer exists in the server database. Stopping the worker's stale transcode state.`
-				);
-
-				try {
-					await socket.timeout(15000).emitWithAck('stop-transcode', existingJobID);
-					workerCanTakeNewJob = true;
-				} catch (err) {
-					logger.error(
-						`[socket] [error] Worker '${workerID}' did not acknowledge stop-transcode for stale job '${existingJobID}'.`
-					);
-					logger.error(err);
-				}
-			} else if (
-				workerJob.worker_id != workerID ||
-				(workerJob.transcode_stage != TranscodeStage.Scanning &&
-					workerJob.transcode_stage != TranscodeStage.Transcoding)
-			) {
-				logger.warn(
-					`[socket] [warn] The server's information about job '${workerJob.job_id}' is out of date. Setting the job's worker and state to 'Unknown' until we hear back from the worker again.`
-				);
-				await DatabaseUpdateJobStatus(existingJobID, {
-					worker_id: workerID,
-					transcode_stage: TranscodeStage.Unknown,
-				});
-			}
-		} else {
-			logger.info(`[socket] Worker '${workerID}' is not busy with an existing job.`);
-			workerCanTakeNewJob = true;
-		}
-
-		if (workerCanTakeNewJob) {
-			await WorkerForAvailableJobs(workerID);
-		}
-
-		socket.on('disconnect', async (reason, details) => {
 			logger.info(
 				`[socket] Worker '${workerID}' with ID '${socket.id}' has disconnected with reason '${reason}'.`
 			);
+			if (details) {
+				logger.info(details);
+			}
+
 			RemoveWorker(socket);
+			RemoveWorkerProperties(workerID);
+
 			const queue = await GetQueue();
 			const workersJob = queue.find((job) => job.worker_id == workerID);
 			if (workersJob) {
-				// StopJob(workersJob.job_id);
-				// logger.info(
-				// 	`[socket] Disconnected worker '${workerID}' was working on job '${workersJob.job_id}' when disconnected - setting job to stopped.`
-				// );
 				logger.info(
 					`[socket] Disconnected worker '${workerID}' was working on job '${workersJob.job_id}' when disconnected - setting job to 'unknown'.`
 				);
 				await DatabaseUpdateJobStatus(workersJob.job_id, {
 					transcode_stage: TranscodeStage.Unknown,
 				});
+				await UpdateQueue();
 			}
-		});
+		};
+
+		socket.on('disconnect', cleanupWorker);
+		AddWorker(socket);
+
+		const stopStaleWorkerJob = async (jobID: number) => {
+			try {
+				await socket.timeout(workerAckTimeoutMs).emitWithAck('stop-transcode', jobID);
+				return true;
+			} catch (err) {
+				logger.error(
+					`[socket] [error] Worker '${workerID}' did not acknowledge stop-transcode for stale job '${jobID}'.`
+				);
+				logger.error(err);
+				return false;
+			}
+		};
+
+		const getOwnedJobStatus = async (jobID: number, eventName: string) => {
+			const status = await DatabaseGetJobStatusByIDOrUndefined(jobID);
+			if (!status) {
+				logger.warn(
+					`[socket] [warn] Ignoring '${eventName}' from worker '${workerID}' for unknown job '${jobID}'.`
+				);
+				return undefined;
+			}
+
+			if (status.worker_id != workerID) {
+				logger.warn(
+					`[socket] [warn] Ignoring '${eventName}' from worker '${workerID}' for job '${jobID}' assigned to '${status.worker_id}'.`
+				);
+				return undefined;
+			}
+
+			return status;
+		};
+
+		try {
+			logger.info(`[socket] Getting worker '${workerID}' properties...`);
+			const properties: WorkerProperties = await socket
+				.timeout(workerAckTimeoutMs)
+				.emitWithAck('get-properties');
+			AddWorkerProperties(workerID, properties);
+			logger.info(`[socket] Worker properties = ${JSON.stringify(properties, null, 2)}`);
+
+			logger.info(`[socket] Checking worker '${workerID}' for an existing job in progress...`);
+			const existingJobID: number | null = await socket
+				.timeout(workerAckTimeoutMs)
+				.emitWithAck('check-for-existing-job');
+			let workerCanTakeNewJob = false;
+
+			if (existingJobID) {
+				logger.info(`[socket] Worker '${workerID}' is busy with job '${existingJobID}'.`);
+
+				const workerJob = await DatabaseEnsureJobStatusByID(existingJobID);
+
+				if (!workerJob) {
+					logger.warn(
+						`[socket] [warn] Worker '${workerID}' reported job '${existingJobID}', but that job no longer exists in the server database. Stopping the worker's stale transcode state.`
+					);
+					workerCanTakeNewJob = await stopStaleWorkerJob(existingJobID);
+				} else if (workerJob.worker_id != workerID) {
+					logger.warn(
+						`[socket] [warn] Worker '${workerID}' reported job '${existingJobID}', but the server has that job assigned to '${workerJob.worker_id}'. Stopping the worker's stale transcode state.`
+					);
+					workerCanTakeNewJob = await stopStaleWorkerJob(existingJobID);
+				} else if (
+					workerJob.transcode_stage != TranscodeStage.Scanning &&
+					workerJob.transcode_stage != TranscodeStage.Transcoding
+				) {
+					logger.warn(
+						`[socket] [warn] The server's information about job '${workerJob.job_id}' is out of date. Setting the job's state to 'Unknown' until we hear back from the worker again.`
+					);
+					await DatabaseUpdateJobStatus(existingJobID, {
+						transcode_stage: TranscodeStage.Unknown,
+					});
+					await UpdateQueue();
+				}
+			} else {
+				logger.info(`[socket] Worker '${workerID}' is not busy with an existing job.`);
+				workerCanTakeNewJob = true;
+			}
+
+			if (workerCanTakeNewJob) {
+				await WorkerForAvailableJobs(workerID);
+			}
+		} catch (err) {
+			logger.error(`[socket] [error] Worker '${workerID}' failed connection initialization.`);
+			logger.error(err);
+			await cleanupWorker('initialization error');
+			socket.disconnect(true);
+			return;
+		}
 
 		socket.on(
 			'get-job-data',
 			async (jobID: number, callback: (jobData: JobType | undefined) => void) => {
+				if (!(await getOwnedJobStatus(jobID, 'get-job-data'))) {
+					callback(undefined);
+					return;
+				}
+
 				const jobData = await DatabaseGetSimpleJobByID(jobID);
 				callback(jobData);
 			}
@@ -129,6 +196,11 @@ export default function WorkerSocket(io: Server) {
 		);
 
 		socket.on('transcode-stopped', async (job_id: number, callback: () => void) => {
+			if (!(await getOwnedJobStatus(job_id, 'transcode-stopped'))) {
+				callback();
+				return;
+			}
+
 			logger.info(
 				`[socket] Worker '${workerID}' with ID '${socket.id}' has stopped transcoding.`
 			);
@@ -154,12 +226,17 @@ export default function WorkerSocket(io: Server) {
 			callback();
 		});
 
-		socket.on('transcode-update', async (job_id: number, status: JobStatusType) => {
-			await DatabaseUpdateJobStatus(job_id, status);
+		socket.on('transcode-update', async (job_id: number, status: UpdateJobStatusType) => {
+			if (!(await getOwnedJobStatus(job_id, 'transcode-update'))) return;
+
+			const { worker_id: _workerID, ...safeStatus } = status;
+			await DatabaseUpdateJobStatus(job_id, safeStatus);
 			await UpdateQueue();
 		});
 
 		socket.on('transcode-error', async (job_id: number) => {
+			if (!(await getOwnedJobStatus(job_id, 'transcode-error'))) return;
+
 			logger.error(
 				`[socket] An error has occurred with job '${job_id}'. The job will be stopped and it's state set to 'Error'.`
 			);
@@ -167,8 +244,11 @@ export default function WorkerSocket(io: Server) {
 			await StopJob(job_id, true);
 		});
 
-		socket.on('transcode-finished', async (job_id: number, status: JobStatusType) => {
-			await DatabaseUpdateJobStatus(job_id, status);
+		socket.on('transcode-finished', async (job_id: number, status: UpdateJobStatusType) => {
+			if (!(await getOwnedJobStatus(job_id, 'transcode-finished'))) return;
+
+			const { worker_id: _workerID, ...safeStatus } = status;
+			await DatabaseUpdateJobStatus(job_id, { ...safeStatus, worker_id: null });
 			await DatabaseUpdateJobOrderIndex(job_id, 0);
 			await UpdateQueue();
 			await WorkerForAvailableJobs(workerID);
