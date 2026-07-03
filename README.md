@@ -1,20 +1,20 @@
 <div align='center'>
     <h1 style='{text-decoration: none}'>HandBrake Web</h1>
     <div align='center'>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/blob/main/LICENSE'>
-        <img alt="GitHub License" src="https://img.shields.io/github/license/thenickoftime/handbrake-web?style=flat-square">
+      <a href='https://github.com/viciros/handbrake-web/blob/main/LICENSE'>
+        <img alt="GitHub License" src="https://img.shields.io/github/license/viciros/handbrake-web?style=flat-square">
       </a>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/releases/latest'>
-        <img alt="GitHub Release" src="https://img.shields.io/github/v/release/thenickoftime/handbrake-web?style=flat-square">
+      <a href='https://github.com/viciros/handbrake-web/releases/latest'>
+        <img alt="GitHub Release" src="https://img.shields.io/github/v/release/viciros/handbrake-web?style=flat-square">
       </a>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/milestone/7'>
+      <a href='https://github.com/viciros/handbrake-web/milestone/7'>
         <img alt="GitHub package.json version" src="https://img.shields.io/badge/development-v0.9.0-goldenrod?style=flat-square">
       </a>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/milestone/7'>
-        <img alt="GitHub milestone details" src="https://img.shields.io/github/milestones/progress-percent/thenickoftime/handbrake-web/7?style=flat-square&label=progress&color=goldenrod">
+      <a href='https://github.com/viciros/handbrake-web/milestone/7'>
+        <img alt="GitHub milestone details" src="https://img.shields.io/github/milestones/progress-percent/viciros/handbrake-web/7?style=flat-square&label=progress&color=goldenrod">
       </a>
-      <a href='https://github.com/TheNickOfTime/handbrake-web/actions/workflows/docker-publish.yaml?query=branch%3Amain'>
-        <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/thenickoftime/handbrake-web/docker-publish.yaml?branch=main&style=flat-square">
+      <a href='https://github.com/viciros/handbrake-web/actions/workflows/docker-publish.yaml?query=branch%3Amain'>
+        <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/viciros/handbrake-web/docker-publish.yaml?branch=main&style=flat-square">
       </a>
       <a href='https://buymeacoffee.com/thenickoftime'>
         <img alt="Static Badge" src="https://img.shields.io/badge/support-buy_me_a_coffee-mediumseagreen?style=flat-square">
@@ -55,7 +55,7 @@ The worker component does the heavy lifting via HandBrakeCLI. Jobs are sent to w
 
 ### Setup Guide
 
-See the [Setup Guide](https://github.com/TheNickOfTime/handbrake-web/wiki/Setup-Guide) wiki page for a detailed walkthrough on getting HandBrake Web setup and configured.
+See the [Setup Guide](https://github.com/viciros/handbrake-web/wiki/Setup-Guide) wiki page for a detailed walkthrough on getting HandBrake Web setup and configured.
 
 ### Quick Start
 
@@ -91,15 +91,15 @@ services:
 
 ### Presets
 
-HandBrake Web currently uses presets configured in the desktop application of HandBrake and exported to .json files to configure encoding jobs. Exported presets can then be uploaded via the web interface in the 'Presets' section. Please see the [Presets](https://github.com/TheNickOfTime/handbrake-web/wiki/Presets) wiki page for additional information.
+HandBrake Web currently uses presets configured in the desktop application of HandBrake and exported to .json files to configure encoding jobs. Exported presets can then be uploaded via the web interface in the 'Presets' section. Please see the [Presets](https://github.com/viciros/handbrake-web/wiki/Presets) wiki page for additional information.
 
 ### Hardware Accelerated Encoding
 
-Additional configuration is required to enable hardware accelerated encoding for GPUs - please see the [Hardware Acceleration](https://github.com/TheNickOfTime/handbrake-web/wiki/Hardware-Acceleration) wiki page for additional information. Currently Intel QSV and NVIDIA NVENC hardware encoding are supported. Support for AMD VCN is planned, but not yet implimented.
+Additional configuration is required to enable hardware accelerated encoding for GPUs - please see the [Hardware Acceleration](https://github.com/viciros/handbrake-web/wiki/Hardware-Acceleration) wiki page for additional information. Currently Intel QSV and NVIDIA NVENC hardware encoding are supported. Support for AMD VCN is planned, but not yet implimented.
 
 ## Features
 
-_These lists are not comprehensive, please see the [development project](https://github.com/users/TheNickOfTime/projects/3) for more information..._
+_These lists are not comprehensive, please see the [project repository](https://github.com/viciros/handbrake-web) for more information..._
 
 ### Current Features
 
@@ -123,7 +123,7 @@ _These lists are not comprehensive, please see the [development project](https:/
 
 ## Bonus Tool (Minimal HandBrakeCLI Image)
 
-If you are looking for a dockerized/containerized way to directly use HandBrakeCLI (via terminal), you can use an additional image this project provides -`ghcr.io/thenickoftime/handbrake-cli`. You can find additional information about using it on the [HandBrakeCLI Image](https://github.com/TheNickOfTime/handbrake-web/wiki/HandBrakeCLI-Image) wiki page.
+If you are looking for a dockerized/containerized way to directly use HandBrakeCLI (via terminal), you can use an additional image this project provides -`ghcr.io/thenickoftime/handbrake-cli`. You can find additional information about using it on the [HandBrakeCLI Image](https://github.com/viciros/handbrake-web/wiki/HandBrakeCLI-Image) wiki page.
 
 This "bonus" image was incredibly simple to make by using the existing outputs of this project's build process, so it felt rude to not make it available to anyone who might want to use it.
 
