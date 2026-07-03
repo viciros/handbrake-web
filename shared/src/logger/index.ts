@@ -21,11 +21,11 @@ const formatInfo = format((info) => {
 
 	switch (typeof info.message) {
 		case 'string':
-			const tagRegex = /\[[\w\d-]+\]\s?/g;
-			const message = (info.message as string).match(/[^\n]+/);
-			const tags = (message ? message[0] : (info.message as string)).match(tagRegex);
+			const tagRegex = /\[[\w\d-]+\][ \t]*/g;
+			const leadingTagRegex = /^(?:\[[\w\d-]+\][ \t]*)+/;
+			const tags = (info.message as string).match(leadingTagRegex)?.[0].match(tagRegex);
 			if (tags) {
-				const newMessage = (info.message as string).replaceAll(tagRegex, '');
+				const newMessage = (info.message as string).replace(leadingTagRegex, '');
 				info.message = newMessage;
 
 				if (

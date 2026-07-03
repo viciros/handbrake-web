@@ -319,7 +319,12 @@ export async function StartTranscode(jobID: number, socket: Socket) {
 		handbrake.stderr.on('data', (data) => {
 			const output: string = data.toString();
 
-			jobLogger.error(`[transcode] \n${output}`);
+			jobLogger.info(`[transcode] \n${output}`);
+		});
+
+		handbrake.on('error', (err) => {
+			jobLogger.error(`[transcode] [error] The HandBrake child process failed.`);
+			jobLogger.error(err);
 		});
 
 		handbrake.on('exit', () => {
