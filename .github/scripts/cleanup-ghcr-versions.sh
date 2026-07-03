@@ -58,7 +58,11 @@ for package in ${PACKAGE_NAMES}; do
 				--arg tag_regex "$TAG_REGEX" \
 				--argjson cutoff_epoch "$cutoff_epoch" \
 				'
-				.[][]
+				..
+				| objects
+				| select((.id? | type) == "number")
+				| select((.updated_at? | type) == "string")
+				| select((.metadata.container.tags? | type) == "array")
 				| {
 					id,
 					updated_at,
