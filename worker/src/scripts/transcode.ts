@@ -31,6 +31,7 @@ let presetPath: string | undefined;
 type ProgressPhase = 'scanning' | 'processing' | 'muxing';
 
 const displayedProgressScale = 10_000;
+const x265ThreadPoolOptions = ['pools=+', 'wpp=1'];
 
 const createProgressNormalizer = () => {
 	const lastProgressByPhase: Partial<Record<ProgressPhase, number>> = {};
@@ -53,9 +54,41 @@ const createProgressNormalizer = () => {
 	};
 };
 
+const getEncoderOptionName = (option: string) =>
+	option.trim().split('=')[0]!.trim().replace(/^no-/, '');
+
+const applyX265ThreadPoolDefaults = (preset: HandbrakePresetType) => ({
+	...preset,
+	PresetList: preset.PresetList.map((presetItem) => {
+		if (!presetItem.VideoEncoder.startsWith('x265')) return presetItem;
+
+		const encoderOptions = (presetItem.VideoOptionExtra ?? '')
+			.split(':')
+			.map((option) => option.trim())
+			.filter((option) => option.length > 0);
+		const encoderOptionNames = encoderOptions.map(getEncoderOptionName);
+		const optionsToAppend = x265ThreadPoolOptions.filter((option) => {
+			const optionName = getEncoderOptionName(option);
+
+			if (optionName == 'pools') {
+				return !encoderOptionNames.some((name) => name == 'pools' || name == 'numa-pools');
+			}
+
+			return !encoderOptionNames.includes(optionName);
+		});
+
+		if (optionsToAppend.length == 0) return presetItem;
+
+		return {
+			...presetItem,
+			VideoOptionExtra: [...encoderOptions, ...optionsToAppend].join(':'),
+		};
+	}),
+});
+
 const writePresetToFile = async (preset: HandbrakePresetType) => {
 	try {
-		const presetString = JSON.stringify(preset);
+		const presetString = JSON.stringify(applyX265ThreadPoolDefaults(preset));
 		const presetDir = '/tmp';
 		const presetName = 'preset.json';
 
