@@ -3,7 +3,6 @@ name: Docker Publish
 on:
   push:
     branches:
-      - main
       - dev
     paths:
       - .github/workflows/docker-publish.yaml
@@ -19,7 +18,6 @@ on:
       - pnpm-workspace.yaml
   pull_request:
     branches:
-      - main
       - dev
     paths:
       - .github/workflows/docker-publish.yaml
@@ -87,7 +85,6 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ matrix.image }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}

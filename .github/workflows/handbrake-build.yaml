@@ -3,14 +3,14 @@ name: Build HandBrake
 on:
   push:
     branches:
-      - main
+      - dev
     paths:
       - .github/workflows/handbrake-build.yaml
       - handbrake/build.Dockerfile
       - handbrake/cli.Dockerfile
   pull_request:
     branches:
-      - main
+      - dev
     paths:
       - .github/workflows/handbrake-build.yaml
       - handbrake/build.Dockerfile
