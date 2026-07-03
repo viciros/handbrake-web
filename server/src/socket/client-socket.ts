@@ -106,7 +106,12 @@ export default function ClientSocket(io: Server) {
 		});
 
 		socket.on('reset-job', async (jobID: number) => {
-			await ResetJob(jobID);
+			try {
+				await ResetJob(jobID);
+			} catch (err) {
+				logger.error(`[socket] [error] Could not reset job '${jobID}'.`);
+				logger.error(err);
+			}
 		});
 
 		socket.on('remove-job', async (jobID: number) => {

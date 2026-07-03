@@ -19,13 +19,16 @@ const selectFromJobsDetailed = database
 	.leftJoin('jobs_order', 'jobs.job_id', 'jobs_order.job_id')
 	.leftJoin('jobs_status', 'jobs.job_id', 'jobs_status.job_id');
 
-const getNextOrderIndex = async () =>
-	(
+const getNextOrderIndex = async () => {
+	const maxOrderIndex = (
 		await database
 			.selectFrom('jobs_order')
 			.select(({ fn }) => fn.max('order_index').as('max'))
 			.executeTakeFirstOrThrow()
-	).max + 1;
+	).max;
+
+	return Number(maxOrderIndex ?? 0) + 1;
+};
 
 export async function DatabaseGetDetailedJobs() {
 	try {
@@ -164,6 +167,22 @@ export async function DatabaseGetJobOrderIndexByID(job_id: number) {
 	}
 }
 
+export async function DatabaseGetJobOrderIndexByIDOrUndefined(job_id: number) {
+	try {
+		const order = await selectFromJobsOrder
+			.where('job_id', '=', job_id)
+			.select('order_index')
+			.executeTakeFirst();
+
+		return order?.order_index;
+	} catch (err) {
+		logger.error(
+			`[database] [error] Could not get the order_index for '${job_id}' from the jobs_order table.`
+		);
+		throw err;
+	}
+}
+
 export async function DatabaseInsertJob(values: AddJobType) {
 	try {
 		const { job_id, nextIndex } = await database.transaction().execute(async (trx) => {
@@ -208,6 +227,14 @@ export async function DatabaseInsertJob(values: AddJobType) {
 
 export async function DatabaseInsertJobOrderByID(job_id: number) {
 	try {
+		const existingOrderIndex = await DatabaseGetJobOrderIndexByIDOrUndefined(job_id);
+		if (existingOrderIndex != undefined) {
+			logger.info(
+				`[database] Job '${job_id}' is already in the jobs_order table with order_index ${existingOrderIndex}.`
+			);
+			return;
+		}
+
 		const nextIndex = await getNextOrderIndex();
 		const result = await database
 			.insertInto('jobs_order')
@@ -215,7 +242,7 @@ export async function DatabaseInsertJobOrderByID(job_id: number) {
 			.executeTakeFirstOrThrow();
 
 		logger.info(
-			`[database] [error] Inserted existing job '${job_id}' back into the jobs_order table with order_index ${nextIndex}.`
+			`[database] Inserted existing job '${job_id}' back into the jobs_order table with order_index ${nextIndex}.`
 		);
 
 		return result;
@@ -283,7 +310,18 @@ export async function DatabaseUpdateJobStatus(job_id: number, status: UpdateJobS
  */
 export async function DatabaseUpdateJobOrderIndex(job_id: number, new_index: number) {
 	try {
-		const previous_index = await DatabaseGetJobOrderIndexByID(job_id);
+		const previous_index = await DatabaseGetJobOrderIndexByIDOrUndefined(job_id);
+
+		if (previous_index == undefined) {
+			if (new_index == 0) {
+				logger.info(
+					`[database] Job '${job_id}' is not in the jobs_order table, nothing to remove.`
+				);
+				return;
+			}
+
+			throw new Error(`Job '${job_id}' is not in the jobs_order table.`);
+		}
 
 		if (previous_index == new_index) return;
 

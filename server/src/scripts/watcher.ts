@@ -3,6 +3,7 @@ import type {
 	AddJobType,
 	AddWatcherRuleType,
 	AddWatcherType,
+	DetailedJobType,
 	DetailedWatcherRuleType,
 	DetailedWatcherType,
 	UpdateWatcherRuleType,
@@ -38,9 +39,40 @@ import {
 import { CheckFilenameCollision } from './files';
 import { ConvertBitsToKilobits, ConvertBytesToMegabytes, GetMediaInfo } from './media';
 import { GetDefaultPresetByName, GetPresetByName } from './presets';
-import { AddJob, GetQueue, GetQueueStatus, RemoveJob, StartQueue } from './queue';
+import {
+	AddJob,
+	GetQueue,
+	GetQueueStatus,
+	RemoveJob,
+	ResetJob,
+	StartQueue,
+	StopJob,
+} from './queue';
 
 const watchers: { [index: number]: FSWatcher } = [];
+
+async function StartQueueIfStopped(watcher: DetailedWatcherType) {
+	const isQueueStopped = (await GetQueueStatus()) == QueueStatus.Stopped;
+	if (watcher.start_queue && isQueueStopped) {
+		logger.info(
+			`[watcher] Watcher for '${watcher.watch_path}' is requesting to start the queue, since it is stopped.`
+		);
+		await StartQueue();
+	}
+}
+
+function FindMatchingWatcherJob(
+	queue: DetailedJobType[],
+	watcher: DetailedWatcherType,
+	filePath: string
+) {
+	return queue.find(
+		(job) =>
+			job.input_path == filePath &&
+			job.preset_category == watcher.preset_category &&
+			job.preset_id == watcher.preset_id
+	);
+}
 
 export function RegisterWatcher(watcher: DetailedWatcherType) {
 	const newWatcher = chokidar.watch(watcher.watch_path, {
@@ -263,6 +295,46 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 
 	const isVideo = mime.getType(filePath);
 	if (isVideo && isVideo.includes('video')) {
+		const existingJob = FindMatchingWatcherJob(await GetQueue(), watcher, filePath);
+		if (existingJob) {
+			switch (existingJob.transcode_stage) {
+				case TranscodeStage.Waiting:
+					logger.info(
+						`[server] [watcher] Job '${existingJob.job_id}' already exists for '${path.basename(
+							filePath
+						)}' and is waiting; no duplicate job will be created.`
+					);
+					await StartQueueIfStopped(watcher);
+					return;
+				case TranscodeStage.Scanning:
+				case TranscodeStage.Transcoding:
+				case TranscodeStage.Unknown:
+					logger.info(
+						`[server] [watcher] Job '${existingJob.job_id}' already exists for '${path.basename(
+							filePath
+						)}' and is active; no duplicate job will be created.`
+					);
+					return;
+				case TranscodeStage.Stopped:
+				case TranscodeStage.Error:
+					logger.info(
+						`[server] [watcher] Job '${existingJob.job_id}' already exists for '${path.basename(
+							filePath
+						)}' and will be reset instead of creating a duplicate.`
+					);
+					await ResetJob(existingJob.job_id);
+					await StartQueueIfStopped(watcher);
+					return;
+				case TranscodeStage.Finished:
+					logger.info(
+						`[server] [watcher] Job '${existingJob.job_id}' already finished for '${path.basename(
+							filePath
+						)}'; no duplicate job will be created.`
+					);
+					return;
+			}
+		}
+
 		const presetData = watcher.preset_category.match(/Default:/)
 			? GetDefaultPresetByName(
 					watcher.preset_category.replace(/Default:\s/, ''),
@@ -294,16 +366,8 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 		logger.info(
 			`[server] [watcher] Watcher for '${watcher.watch_path}' is requesting a new job be made for the video file '${parsedPath.base}'.`
 		);
-		AddJob(newJobRequest);
-
-		// Start the queue if the option is enabled on the watcher
-		const isQueueStopped = (await GetQueueStatus()) == QueueStatus.Stopped;
-		if (watcher.start_queue && isQueueStopped) {
-			logger.info(
-				`[watcher] Watcher for '${watcher.watch_path}' is requesting to start the queue, since it is stopped.`
-			);
-			await StartQueue();
-		}
+		await AddJob(newJobRequest);
+		await StartQueueIfStopped(watcher);
 	}
 }
 
@@ -317,19 +381,26 @@ async function onWatcherDetectFileDelete(watcher: DetailedWatcherType, filePath:
 	const isVideo = mime.getType(filePath);
 	if (isVideo && isVideo.includes('video')) {
 		const queue = await GetQueue();
-		const jobsToDelete = Object.keys(queue)
-			.map((key) => parseInt(key))
-			.filter(
-				(key) =>
-					queue[key].input_path == filePath &&
-					queue[key].transcode_stage == TranscodeStage.Waiting
-			);
-		jobsToDelete.forEach((jobID) => {
-			logger.info(
-				`[server] [watcher] Watcher for '${watcher.watch_path}' is requesting removal of job '${jobID}' because the input file '${filePath}' has been deleted.`
-			);
-			RemoveJob(jobID);
-		});
+		const jobsForDeletedInput = queue.filter((job) => job.input_path == filePath);
+
+		for (const job of jobsForDeletedInput) {
+			switch (job.transcode_stage) {
+				case TranscodeStage.Waiting:
+					logger.info(
+						`[server] [watcher] Watcher for '${watcher.watch_path}' is requesting removal of job '${job.job_id}' because the input file '${filePath}' has been deleted.`
+					);
+					await RemoveJob(job.job_id);
+					break;
+				case TranscodeStage.Scanning:
+				case TranscodeStage.Transcoding:
+				case TranscodeStage.Unknown:
+					logger.info(
+						`[server] [watcher] Watcher for '${watcher.watch_path}' is requesting stop of job '${job.job_id}' because the input file '${filePath}' has been deleted.`
+					);
+					await StopJob(job.job_id);
+					break;
+			}
+		}
 	}
 }
 
