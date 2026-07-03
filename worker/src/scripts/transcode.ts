@@ -28,6 +28,31 @@ let currentJob: JobType | null = null;
 export let currentJobID: number | null = null;
 let presetPath: string | undefined;
 
+type ProgressPhase = 'scanning' | 'processing' | 'muxing';
+
+const displayedProgressScale = 10_000;
+
+const createProgressNormalizer = () => {
+	const lastProgressByPhase: Partial<Record<ProgressPhase, number>> = {};
+
+	return (phase: ProgressPhase, progress: number) => {
+		if (!Number.isFinite(progress)) {
+			return undefined;
+		}
+
+		const clampedProgress = Math.min(Math.max(progress, 0), 1);
+		const displayedProgress = Math.round(clampedProgress * displayedProgressScale);
+		const previousProgress = lastProgressByPhase[phase];
+
+		if (previousProgress !== undefined && displayedProgress <= previousProgress) {
+			return undefined;
+		}
+
+		lastProgressByPhase[phase] = displayedProgress;
+		return displayedProgress / displayedProgressScale;
+	};
+};
+
 const writePresetToFile = async (preset: HandbrakePresetType) => {
 	try {
 		const presetString = JSON.stringify(preset);
@@ -87,6 +112,7 @@ export async function StartTranscode(jobID: number, socket: Socket) {
 			`${env.WORKER_ID!}-job-${jobID}`,
 			path.join(getDataPath(), 'log')
 		);
+		const normalizeProgress = createProgressNormalizer();
 
 		handbrake = spawn('HandBrakeCLI', [
 			'--preset-import-file',
@@ -128,42 +154,57 @@ export async function StartTranscode(jobID: number, socket: Socket) {
 						switch (outputJSON['State']) {
 							case 'SCANNING':
 								const scanning: Scanning = outputJSON.Scanning!;
+								const scanningProgress = normalizeProgress(
+									'scanning',
+									scanning.Progress
+								);
+								if (scanningProgress == undefined) break;
+
 								const scanningStatus: UpdateJobStatusType = {
 									transcode_stage: TranscodeStage.Scanning,
-									transcode_percentage: scanning.Progress,
+									transcode_percentage: scanningProgress,
 								};
 								socket.emit('transcode-update', jobID, scanningStatus);
 								jobLogger.info(
-									`[transcode] [scanning] ${(scanning.Progress * 100).toFixed(
+									`[transcode] [scanning] ${(scanningProgress * 100).toFixed(
 										2
 									)} %`
 								);
 								break;
 							case 'WORKING':
 								const working: Working = outputJSON.Working!;
+								const workingProgress = normalizeProgress(
+									'processing',
+									working.Progress
+								);
+								if (workingProgress == undefined) break;
+
 								const workingStatus: UpdateJobStatusType = {
 									transcode_stage: TranscodeStage.Transcoding,
-									transcode_percentage: working.Progress,
+									transcode_percentage: workingProgress,
 									transcode_eta: working.ETASeconds,
 									transcode_fps_current: working.Rate,
 									transcode_fps_average: working.RateAvg,
 								};
 								socket.emit('transcode-update', jobID, workingStatus);
 								jobLogger.info(
-									`[transcode] [processing] ${(working.Progress * 100).toFixed(
+									`[transcode] [processing] ${(workingProgress * 100).toFixed(
 										2
 									)} %`
 								);
 								break;
 							case 'MUXING':
 								const muxing: Muxing = outputJSON.Muxing!;
+								const muxingProgress = normalizeProgress('muxing', muxing.Progress);
+								if (muxingProgress == undefined) break;
+
 								const muxingStatus: UpdateJobStatusType = {
 									transcode_stage: TranscodeStage.Transcoding,
-									transcode_percentage: muxing.Progress,
+									transcode_percentage: muxingProgress,
 								};
 								socket.emit('transcode-update', jobID, muxingStatus);
 								jobLogger.info(
-									`[transcode] [muxing] ${(muxing.Progress * 100).toFixed(2)} %`
+									`[transcode] [muxing] ${(muxingProgress * 100).toFixed(2)} %`
 								);
 								break;
 							case 'WORKDONE':
