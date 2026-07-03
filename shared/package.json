@@ -29,8 +29,8 @@
       "default": "./build/types/*.js"
     },
     "./logger": {
-      "default": "./build/logger/index.js",
-      "types": "./build/logger/index.d.ts"
+      "types": "./build/logger/index.d.ts",
+      "default": "./build/logger/index.js"
     }
   },
   "dependencies": {

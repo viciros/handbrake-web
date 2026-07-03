@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - docs/**
-      - .github/workflows/wiki-publish.yml
+      - .github/workflows/wiki-publish.yaml
 
 concurrency:
   group: wiki-publish

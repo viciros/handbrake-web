@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsr generate && tsc -b && vite build",
-    "lint": "tsc -b",
+    "lint": "tsr generate && tsc -b",
     "preview": "vite preview"
   },
   "repository": {

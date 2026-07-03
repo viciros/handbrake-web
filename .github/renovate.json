@@ -5,7 +5,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^handbrake/Dockerfile$/"],
+      "managerFilePatterns": ["/^handbrake\\/build\\.Dockerfile$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>.+?)\\sdepName=(?<depName>.+?) packageName=(?<packageName>.+?)\\nARG .+?_VERSION=(?<currentValue>[\\d.]+)"
       ]
