@@ -64,6 +64,11 @@ const initClient = async (socket: Client) => {
 	socket.emit('watchers-update', await DatabaseGetDetailedWatchers());
 };
 
+const logClientSocketError = (socketID: string, action: string, err: unknown) => {
+	logger.error(`[socket] [error] Client '${socketID}' ${action}.`);
+	logger.error(err);
+};
+
 export default function ClientSocket(io: Server) {
 	const namespace = io.of('/client');
 	namespace.use(AuthenticateClientSocket);
@@ -71,7 +76,9 @@ export default function ClientSocket(io: Server) {
 	namespace.on('connection', (socket) => {
 		logger.info(`[socket] Client '${socket.id}' has connected.`);
 		AddClient(socket);
-		initClient(socket);
+		initClient(socket).catch((err) => {
+			logClientSocketError(socket.id, 'could not be initialized', err);
+		});
 
 		socket.on('disconnect', () => {
 			logger.info(`[socket] Client '${socket.id}' has disconnected.`);
@@ -97,12 +104,17 @@ export default function ClientSocket(io: Server) {
 		});
 
 		// Jobs ------------------------------------------------------------------------------------
-		socket.on('add-job', async (data: AddJobType, callback: () => void) => {
+		socket.on('add-job', async (data: AddJobType, callback?: () => void) => {
 			logger.info(
 				`[socket] Client '${socket.id}' has requested to add a job for '${data.input_path}' to the queue.`
 			);
-			await AddJob(data);
-			callback();
+			try {
+				await AddJob(data);
+			} catch (err) {
+				logClientSocketError(socket.id, `could not add job for '${data.input_path}'`, err);
+			} finally {
+				callback?.();
+			}
 		});
 
 		socket.on('stop-job', async (jobID: number) => {
@@ -135,10 +147,20 @@ export default function ClientSocket(io: Server) {
 		// Directory -------------------------------------------------------------------------------
 		socket.on(
 			'get-directory',
-			async (request: DirectoryRequestType, callback: (directory: DirectoryType) => void) => {
-				const items = await GetDirectoryItems(request.path, request.isRecursive);
-				if (items) {
-					callback(items);
+			async (
+				request: DirectoryRequestType,
+				callback: (directory: DirectoryType | null) => void
+			) => {
+				try {
+					const items = await GetDirectoryItems(request.path, request.isRecursive);
+					callback(items ?? null);
+				} catch (err) {
+					logClientSocketError(
+						socket.id,
+						`could not get directory '${request.path}'`,
+						err
+					);
+					callback(null);
 				}
 			}
 		);
@@ -146,8 +168,17 @@ export default function ClientSocket(io: Server) {
 		socket.on(
 			'make-directory',
 			async (item: CreateDirectoryRequestType, callback: (result: boolean) => void) => {
-				const result = await MakeDirectory(item.path, item.name);
-				callback(result);
+				try {
+					const result = await MakeDirectory(item.path, item.name);
+					callback(result);
+				} catch (err) {
+					logClientSocketError(
+						socket.id,
+						`could not make directory '${item.name}' in '${item.path}'`,
+						err
+					);
+					callback(false);
+				}
 			}
 		);
 
@@ -158,8 +189,17 @@ export default function ClientSocket(io: Server) {
 				newItems: DirectoryItemsType,
 				callback: (items: DirectoryItemsType) => void
 			) => {
-				const checkItems = await CheckFilenameCollision(path, newItems);
-				callback(checkItems);
+				try {
+					const checkItems = await CheckFilenameCollision(path, newItems);
+					callback(checkItems);
+				} catch (err) {
+					logClientSocketError(
+						socket.id,
+						`could not check name collisions in '${path}'`,
+						err
+					);
+					callback(newItems);
+				}
 			}
 		);
 

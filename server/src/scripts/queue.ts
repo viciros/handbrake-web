@@ -96,7 +96,7 @@ export async function InitializeQueue() {
 			);
 		}
 	}
-	EmitToAllClients('queue-update', queue);
+	await UpdateQueue();
 }
 
 export async function GetBusyWorkers() {

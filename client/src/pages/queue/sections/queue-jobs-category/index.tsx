@@ -35,7 +35,7 @@ export default function QueueJobsCategory({
 
 	const [isCollapsed, setIsCollapsed] = useState(startCollapsed);
 
-	const orderedJobs = queue.sort((a, b) => {
+	const orderedJobs = [...queue].sort((a, b) => {
 		const stageA = a.transcode_stage;
 		const stageB = b.transcode_stage;
 		if (stageA != undefined && stageB != undefined) {

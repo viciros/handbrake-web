@@ -25,7 +25,7 @@ export default function QueueSection({ queue }: Properties) {
 					</tr>
 				</thead>
 				<tbody>
-					{queue
+					{[...queue]
 						.sort(
 							(a, b) => {
 								const stageA = a.transcode_stage;
@@ -39,7 +39,7 @@ export default function QueueSection({ queue }: Properties) {
 									const orderB = b.order_index;
 
 									const finishedA = a.time_finished || 0;
-									const finishedB = a.time_finished || 0;
+									const finishedB = b.time_finished || 0;
 
 									return stageA == stageB
 										? orderA != null && orderB != null
