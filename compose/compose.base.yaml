@@ -8,6 +8,10 @@ services:
     user: 1000:1000 # edit to run as user (uuid:guid) with permissions to access your media. 0:0 to run as root (not recommended).
     ports:
       - 9999:9999
+    environment:
+      - HANDBRAKE_WEB_USERNAME=admin # change before exposing the server
+      - HANDBRAKE_WEB_PASSWORD=change-this-password # change before exposing the server
+      - HANDBRAKE_WORKER_SECRET=change-this-worker-secret # must match every worker
     volumes:
       - /path/to/your/data:/data
       - /path/to/your/media:/video # ensure this path is the same across all containers
@@ -20,6 +24,7 @@ services:
       - WORKER_ID=handbrake-worker # give your worker a unique name
       - SERVER_URL=handbrake-server # change if setting up a standalone worker, prefix with http(s):// if necessary
       - SERVER_PORT=9999 # change if using a reverse proxy or the port is otherwise different than above
+      - HANDBRAKE_WORKER_SECRET=change-this-worker-secret # must match the server
     volumes:
       - /path/to/your/media:/video # ensure this path is the same across all containers
     depends_on:

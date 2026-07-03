@@ -12,9 +12,16 @@ export default async function WorkerStartup() {
 
 	// Get worker ID from env variable, exit process if it is not set --------------
 	const workerID = process.env.WORKER_ID;
+	const workerSecret = process.env.HANDBRAKE_WORKER_SECRET;
 	if (!workerID) {
 		logger.error(
 			"No 'WORKER_ID' envrionment variable is set - this worker will not be set up. Please set this via your docker-compose environment section."
+		);
+		process.exit(0);
+	}
+	if (!workerSecret) {
+		logger.error(
+			"No 'HANDBRAKE_WORKER_SECRET' environment variable is set - this worker cannot authenticate to the server."
 		);
 		process.exit(0);
 	}
@@ -31,6 +38,7 @@ export default async function WorkerStartup() {
 	const canConnect = serverURL != undefined && serverPort != undefined;
 	const server = io(serverAddress, {
 		autoConnect: false,
+		auth: { workerSecret },
 		query: { workerID: workerID },
 	});
 

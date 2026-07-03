@@ -6,6 +6,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import logger from 'logging';
 import ClientRoutes from 'routes/client';
+import { corsOptions, ValidateAuthConfig } from 'scripts/auth';
 import { LoadConfig } from 'scripts/config/config';
 import { DatabaseConnect } from 'scripts/database/database';
 import { LoadDefaultPresets, LoadPresets } from 'scripts/presets';
@@ -17,6 +18,9 @@ import WorkerSocket from 'socket/worker-socket';
 import { RegisterExitListeners } from './server-shutdown';
 
 export default async function ServerStartup() {
+	// Auth -----------------------------------------------------------------------------------------
+	ValidateAuthConfig();
+
 	// Config---------------------------------------------------------------------------------------
 	await LoadConfig();
 
@@ -33,13 +37,11 @@ export default async function ServerStartup() {
 	const app = express();
 	const server = createServer(app);
 	const socket = new SocketServer(server, {
-		cors: {
-			origin: '*',
-		},
+		cors: corsOptions,
 		pingTimeout: 5000,
 	});
 
-	app.use(cors());
+	app.use(cors(corsOptions));
 
 	// Routes ------------------------------------------------------------------------------
 	ClientRoutes(app);
@@ -53,7 +55,7 @@ export default async function ServerStartup() {
 
 	// Start Server --------------------------------------------------------------------------------
 	const url = process.env.SERVER_URL || 'http://localhost';
-	const port = 9999;
+	const port = parseInt(process.env.SERVER_PORT || '9999');
 
 	await new Promise<void>((resolve) => {
 		server.listen(port, () => {

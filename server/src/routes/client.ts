@@ -1,10 +1,13 @@
 import express, { type Express, type Request } from 'express';
 import { GetJobLogByID } from 'logging';
 import path from 'path';
+import { RequireHttpAuth } from 'scripts/auth';
 
 export default function ClientRoutes(app: Express) {
 	const clientBuildPath = path.join('/handbrake-web/client');
 	const isProduction = process.env.NODE_ENV == 'production';
+
+	app.use(RequireHttpAuth);
 
 	if (isProduction) {
 		app.use(express.static(clientBuildPath));

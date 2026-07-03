@@ -12,6 +12,10 @@ services:
       - 9999:9999
     devices:
       - /dev/dri:/dev/dri # this maps your GPU device into the container
+    environment:
+      - HANDBRAKE_WEB_USERNAME=admin # change before exposing the server
+      - HANDBRAKE_WEB_PASSWORD=change-this-password # change before exposing the server
+      - HANDBRAKE_WORKER_SECRET=change-this-worker-secret # must match every worker
     volumes:
       - /path/to/your/data:/data
       - /path/to/your/media:/video # ensure this path is the same across all containers
@@ -24,6 +28,7 @@ services:
       - WORKER_ID=handbrake-worker-intel # give your worker a unique name
       - SERVER_URL=handbrake-server # change if setting up a standalone worker, prefix with http(s):// if necessary
       - SERVER_PORT=9999 # change if using a reverse proxy or the port is otherwise different than above
+      - HANDBRAKE_WORKER_SECRET=change-this-worker-secret # must match the server
     volumes:
       - /path/to/your/media:/video # ensure this path is the same across all containers
     depends_on:

@@ -1,5 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-
 import { ConfigType } from '@handbrake-web/shared/types/config';
 import { DetailedWatcherType } from '@handbrake-web/shared/types/database';
 import { HandbrakePresetCategoryType } from '@handbrake-web/shared/types/preset';
@@ -14,6 +12,42 @@ import NoConnection from '~pages/_default/no-connection';
 import { PrimaryContext } from './context';
 // import styles from './styles.module.scss';
 
+type Credentials = {
+	username: string;
+	password: string;
+};
+
+const credentialsStorageKey = 'handbrake-web-credentials';
+
+const readStoredCredentials = () => {
+	try {
+		const storedCredentials = sessionStorage.getItem(credentialsStorageKey);
+		return storedCredentials ? (JSON.parse(storedCredentials) as Credentials) : null;
+	} catch {
+		return null;
+	}
+};
+
+const writeStoredCredentials = (credentials: Credentials) => {
+	sessionStorage.setItem(credentialsStorageKey, JSON.stringify(credentials));
+};
+
+const clearStoredCredentials = () => {
+	sessionStorage.removeItem(credentialsStorageKey);
+};
+
+const promptForCredentials = (): Credentials | null => {
+	const username = window.prompt('HandBrake Web username');
+	if (!username) return null;
+
+	const password = window.prompt('HandBrake Web password');
+	if (password == null) return null;
+
+	const credentials = { username, password };
+	writeStoredCredentials(credentials);
+	return credentials;
+};
+
 export default function PrimaryLayout() {
 	const baseURLRegex = /(^https?:\/\/.+\/)(.+$)/;
 	const serverURL = (
@@ -23,7 +57,11 @@ export default function PrimaryLayout() {
 	const serverSocketPath = 'client';
 	const server = `${serverURL}${serverSocketPath}`;
 
-	const [socket] = useState(io(server, { autoConnect: false }));
+	const [credentials, setCredentials] = useState<Credentials | null>(readStoredCredentials);
+	const [socket] = useState(() =>
+		io(server, { autoConnect: false, auth: credentials ?? undefined })
+	);
+	const [isConnected, setIsConnected] = useState(false);
 	const [config, setConfig] = useState<ConfigType>();
 	const [queue, setQueue] = useState<QueueType>([]);
 	const [queueStatus, setQueueStatus] = useState<QueueStatus>(QueueStatus.Idle);
@@ -39,26 +77,43 @@ export default function PrimaryLayout() {
 
 	// Connect to server -------------------------------------------------------
 	useEffect(() => {
+		if (!credentials) {
+			const newCredentials = promptForCredentials();
+			if (newCredentials) {
+				setCredentials(newCredentials);
+			}
+			return;
+		}
+
 		console.log(`[client] Connecting to '${server}...'`);
+		socket.auth = credentials;
 		socket.connect();
 
 		return () => {
 			socket.disconnect();
 		};
-	}, []);
+	}, [credentials, server, socket]);
 
 	// Error event listeners ---------------------------------------------------
 	const onConnect = () => {
 		console.log(`[client] Connection established to '${server}'`);
+		setIsConnected(true);
 	};
 
 	const onConnectError = (error: Error) => {
 		console.error(`[client] Error has occurred connecting to '${server}':`);
 		console.error(error);
+		setIsConnected(false);
+
+		if (error.message == 'unauthorized') {
+			clearStoredCredentials();
+			setCredentials(null);
+		}
 	};
 
 	const onDisconnect = (reason: string) => {
 		console.log(`[client] Disconnected from '${server}' because ${reason}`);
+		setIsConnected(false);
 	};
 
 	useEffect(() => {
@@ -71,7 +126,7 @@ export default function PrimaryLayout() {
 			socket.off('connect_error', onConnectError);
 			socket.off('disconnect', onDisconnect);
 		};
-	});
+	}, [server, socket]);
 
 	// Server event listeners --------------------------------------------------
 	const onConfigUpdate = (config: ConfigType) => {
@@ -138,7 +193,7 @@ export default function PrimaryLayout() {
 			socket.off('properties-update', onPropertiesUpdate);
 			socket.off('watchers-update', onWatchersUpdate);
 		};
-	});
+	}, [queueStatus, socket]);
 
 	return (
 		<Fragment>
@@ -148,7 +203,7 @@ export default function PrimaryLayout() {
 				socket={socket}
 				config={config}
 			/>
-			{socket.connected && config != undefined ? (
+			{isConnected && config != undefined ? (
 				<PrimaryContext
 					value={{
 						serverURL,

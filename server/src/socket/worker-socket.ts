@@ -4,6 +4,7 @@ import { QueueStatus } from '@handbrake-web/shared/types/queue';
 import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import type { WorkerProperties } from '@handbrake-web/shared/types/worker';
 import logger, { logPath, WriteWorkerLogToFile } from 'logging';
+import { AuthenticateWorkerSocket } from 'scripts/auth';
 import { AddWorker, RemoveWorker } from 'scripts/connections';
 import {
 	DatabaseEnsureJobStatusByID,
@@ -24,7 +25,10 @@ import {
 import { Server } from 'socket.io';
 
 export default function WorkerSocket(io: Server) {
-	io.of('/worker').on('connection', async (socket) => {
+	const namespace = io.of('/worker');
+	namespace.use(AuthenticateWorkerSocket);
+
+	namespace.on('connection', async (socket) => {
 		const workerID = socket.handshake.query['workerID'] as string;
 
 		logger.info(`[socket] Worker '${workerID}' has connected with ID '${socket.id}'.`);

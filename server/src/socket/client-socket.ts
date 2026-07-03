@@ -15,6 +15,7 @@ import {
 import { type HandbrakePresetType } from '@handbrake-web/shared/types/preset';
 import { type GithubReleaseResponseType } from '@handbrake-web/shared/types/version';
 import logger from 'logging';
+import { AuthenticateClientSocket } from 'scripts/auth';
 import { GetConfig, WriteConfig } from 'scripts/config/config';
 import { AddClient, RemoveClient } from 'scripts/connections';
 import {
@@ -64,7 +65,10 @@ const initClient = async (socket: Client) => {
 };
 
 export default function ClientSocket(io: Server) {
-	io.of('/client').on('connection', (socket) => {
+	const namespace = io.of('/client');
+	namespace.use(AuthenticateClientSocket);
+
+	namespace.on('connection', (socket) => {
 		logger.info(`[socket] Client '${socket.id}' has connected.`);
 		AddClient(socket);
 		initClient(socket);
