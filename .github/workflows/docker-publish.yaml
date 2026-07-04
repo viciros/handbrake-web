@@ -6,7 +6,6 @@ on:
       - dev
     paths:
       - .github/workflows/docker-publish.yaml
-      - .github/workflows/handbrake-build.yaml
       - client/**
       - docker/**
       - handbrake/build.Dockerfile
@@ -21,7 +20,6 @@ on:
       - dev
     paths:
       - .github/workflows/docker-publish.yaml
-      - .github/workflows/handbrake-build.yaml
       - client/**
       - docker/**
       - handbrake/build.Dockerfile
@@ -44,11 +42,95 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-handbrake-base:
+  prepare-handbrake-base:
     runs-on: ubuntu-latest
 
     outputs:
-      tag: ${{ steps.image-tag.outputs.tag }}
+      build-tag: ${{ steps.base-image.outputs.build-tag }}
+      should-build: ${{ steps.base-image.outputs.should-build }}
+      tag: ${{ steps.base-image.outputs.tag }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Get HandBrake version
+        run: cat handbrake/build.Dockerfile | grep -oP '(?<=ARG\s)(HANDBRAKE_VERSION=.+)' >> $GITHUB_ENV
+
+      - name: Check for version env variable
+        if: ${{ env.HANDBRAKE_VERSION == '' }}
+        run: |
+          echo "Critical environment variable 'HANDBRAKE_VERSION' does not exist. Exiting job with error."
+          exit 1
+
+      - name: Determine HandBrake base image
+        id: base-image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          event_name="${{ github.event_name }}"
+          build_tag="${{ github.ref_name }}"
+          reuse_tag="${{ github.ref_name }}"
+          should_build=false
+
+          if [[ "$event_name" == "release" ]]; then
+            build_tag="latest"
+            reuse_tag="$HANDBRAKE_VERSION"
+            previous_tag="$(git tag --sort=-creatordate | grep -Fvx -- '${{ github.ref_name }}' | head -n 1 || true)"
+
+            if [[ -z "$previous_tag" ]]; then
+              echo "No previous tag found; the HandBrake base will be built."
+              should_build=true
+            else
+              base_sha="$previous_tag"
+              head_sha="${{ github.sha }}"
+            fi
+          elif [[ "$event_name" == "pull_request" ]]; then
+            build_tag="pr-${{ github.event.number }}"
+            reuse_tag="${{ github.base_ref }}"
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+          fi
+
+          if [[ "$should_build" != "true" ]]; then
+            if [[ "$base_sha" =~ ^0+$ ]]; then
+              echo "No usable base SHA found; the HandBrake base will be built."
+              should_build=true
+            else
+              changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
+
+              if grep -Eq '^(handbrake/build\.Dockerfile|\.github/workflows/docker-publish\.yaml)$' <<< "$changed_files"; then
+                should_build=true
+              fi
+            fi
+          fi
+
+          if [[ "$should_build" == "true" ]]; then
+            tag="$build_tag"
+          else
+            tag="$reuse_tag"
+          fi
+
+          echo "build-tag=$build_tag" >> "$GITHUB_OUTPUT"
+          echo "should-build=$should_build" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          echo "HandBrake base rebuild required: $should_build"
+          echo "HandBrake base tag for app builds: $tag"
+
+  build-handbrake-base:
+    runs-on: ubuntu-latest
+    needs: prepare-handbrake-base
+    if: ${{ needs.prepare-handbrake-base.outputs.should-build == 'true' }}
 
     permissions:
       contents: read
@@ -67,22 +149,6 @@ jobs:
           echo "Critical environment variable 'HANDBRAKE_VERSION' does not exist. Exiting job with error."
           exit 1
 
-      - name: Determine HandBrake image tag
-        id: image-tag
-        run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            tag="latest"
-          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            tag="pr-${{ github.event.number }}"
-          else
-            tag="${{ github.ref_name }}"
-          fi
-
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -99,7 +165,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/handbrake-build
           tags: |
-            type=raw,value=${{ steps.image-tag.outputs.tag }}
+            type=raw,value=${{ needs.prepare-handbrake-base.outputs.build-tag }}
             type=raw,value=${{ env.HANDBRAKE_VERSION }},enable=${{ github.event_name == 'release' }}
 
       - name: Build and push Docker image
@@ -107,7 +173,7 @@ jobs:
         with:
           context: .
           file: handbrake/build.Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           provenance: mode=max
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -117,7 +183,10 @@ jobs:
 
   build-handbrake-web:
     runs-on: ubuntu-latest
-    needs: build-handbrake-base
+    needs:
+      - prepare-handbrake-base
+      - build-handbrake-base
+    if: ${{ always() && needs.prepare-handbrake-base.result == 'success' && (needs.build-handbrake-base.result == 'success' || needs.build-handbrake-base.result == 'skipped') }}
 
     strategy:
       fail-fast: false
@@ -138,9 +207,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -184,10 +250,10 @@ jobs:
         with:
           context: .
           file: ${{ matrix.file }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           build-args: |
             DISTROLESS_VARIANT=${{ github.head_ref == '' && 'nonroot' || 'debug-nonroot' }}
-            HANDBRAKE_BUILD_TAG=${{ needs.build-handbrake-base.outputs.tag }}
+            HANDBRAKE_BUILD_TAG=${{ needs.prepare-handbrake-base.outputs.tag }}
             APP_VERSION=${{ steps.app-version.outputs.version }}
           provenance: false
           push: true
