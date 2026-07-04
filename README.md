@@ -66,6 +66,7 @@ services:
   handbrake-server:
     image: ghcr.io/viciros/handbrake-web-server:latest
     container_name: handbrake-web-server
+    restart: unless-stopped
     user: 1000:1000 # edit to run as user (uuid:guid) with permissions to access your media. 0:0 to run as root (not recommended).
     ports:
       - 9999:9999
@@ -81,6 +82,7 @@ services:
   handbrake-worker:
     image: ghcr.io/viciros/handbrake-web-worker:latest
     container_name: handbrake-web-worker
+    restart: unless-stopped
     user: 1000:1000 # edit to run as user (uuid:guid) with permissions to access your media. 0:0 to run as root (not recommended).
     environment:
       - WORKER_ID=handbrake-worker # give your worker a unique name
