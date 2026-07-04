@@ -4,28 +4,63 @@ import {
 	type DirectoryType,
 } from '@handbrake-web/shared/types/directory';
 import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import type { Dirent } from 'fs';
 import fs from 'fs/promises';
 import logger from 'logging';
 import path from 'path';
-import { AssertDirectoryNameSafe, AssertPathInMediaRoots, IsPathInMediaRoots } from './path-safety';
+import {
+	AssertDirectoryNameSafe,
+	AssertExistingDirectoryInMediaRoots,
+	IsPathInMediaRoots,
+} from './path-safety';
 import { GetQueue } from './queue';
+
+const getMaxDirectoryItems = () => parseInt(process.env.HANDBRAKE_MAX_DIRECTORY_ITEMS || '5000');
+
+const directoryItemFromDirent = (parentPath: string, item: Dirent): DirectoryItemType => {
+	const parsedName = path.parse(item.name);
+
+	return {
+		path: path.join(parentPath, item.name),
+		name: parsedName.name,
+		extension: parsedName.ext,
+		isDirectory: item.isDirectory(),
+	};
+};
+
+const GetDirectoryItemList = async (rootPath: string, recursive: boolean) => {
+	const maxDirectoryItems = getMaxDirectoryItems();
+	const pendingDirectories = [rootPath];
+	const items: DirectoryItemsType = [];
+
+	while (pendingDirectories.length > 0) {
+		const currentPath = pendingDirectories.shift()!;
+		const dir = await fs.readdir(currentPath, {
+			encoding: 'utf-8',
+			withFileTypes: true,
+		});
+
+		for (const item of dir) {
+			if (items.length >= maxDirectoryItems) {
+				throw new Error(
+					`Directory '${rootPath}' has more than ${maxDirectoryItems} items.`
+				);
+			}
+
+			items.push(directoryItemFromDirent(currentPath, item));
+
+			if (recursive && item.isDirectory()) {
+				pendingDirectories.push(path.join(currentPath, item.name));
+			}
+		}
+	}
+
+	return items;
+};
 
 export async function GetDirectoryItems(absolutePath: string, recursive: boolean = false) {
 	try {
-		const safePath = AssertPathInMediaRoots(absolutePath, 'directory');
-
-		// Get directory
-		const dir = await fs.readdir(safePath, {
-			encoding: 'utf-8',
-			withFileTypes: true,
-			recursive: recursive,
-		});
-		const maxDirectoryItems = parseInt(process.env.HANDBRAKE_MAX_DIRECTORY_ITEMS || '5000');
-		if (dir.length > maxDirectoryItems) {
-			throw new Error(
-				`Directory '${safePath}' has ${dir.length} items, above the limit ${maxDirectoryItems}.`
-			);
-		}
+		const safePath = await AssertExistingDirectoryInMediaRoots(absolutePath, 'directory');
 
 		// Make parent item
 		const parentPath = path.resolve(safePath, '..');
@@ -46,15 +81,7 @@ export async function GetDirectoryItems(absolutePath: string, recursive: boolean
 		};
 
 		// Make directory items
-		const items: DirectoryItemsType = dir.map((item) => {
-			const parsedName = path.parse(item.name);
-			return {
-				path: path.join(item.parentPath, item.name),
-				name: parsedName.name,
-				extension: parsedName.ext,
-				isDirectory: item.isDirectory(),
-			};
-		});
+		const items = await GetDirectoryItemList(safePath, recursive);
 
 		// Build directory object
 		const result: DirectoryType = {
@@ -72,7 +99,10 @@ export async function GetDirectoryItems(absolutePath: string, recursive: boolean
 
 export async function MakeDirectory(directoryPath: string, directoryName: string) {
 	try {
-		const safeDirectoryPath = AssertPathInMediaRoots(directoryPath, 'directory');
+		const safeDirectoryPath = await AssertExistingDirectoryInMediaRoots(
+			directoryPath,
+			'directory'
+		);
 		const safeDirectoryName = AssertDirectoryNameSafe(directoryName);
 
 		// Check if the program has write permissions in the parent dir
@@ -82,10 +112,7 @@ export async function MakeDirectory(directoryPath: string, directoryName: string
 		const parentMode = (await fs.stat(safeDirectoryPath)).mode;
 
 		// Make new directory
-		const fullPath = AssertPathInMediaRoots(
-			path.join(safeDirectoryPath, safeDirectoryName),
-			'new directory'
-		);
+		const fullPath = path.join(safeDirectoryPath, safeDirectoryName);
 		await fs.mkdir(fullPath, { mode: parentMode, recursive: false });
 		return true;
 	} catch (err) {
@@ -95,7 +122,7 @@ export async function MakeDirectory(directoryPath: string, directoryName: string
 }
 
 export async function CheckFilenameCollision(existingDir: string, newItems: DirectoryItemsType) {
-	AssertPathInMediaRoots(existingDir, 'output directory');
+	await AssertExistingDirectoryInMediaRoots(existingDir, 'output directory');
 	const directory = await GetDirectoryItems(existingDir);
 	const existingItems = directory ? directory.items : [];
 	const queue = await GetQueue();

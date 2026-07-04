@@ -9,6 +9,7 @@ import {
 } from '@handbrake-web/shared/scripts/worker-auth';
 import 'dotenv/config';
 import logger from 'logging';
+import { isIP } from 'node:net';
 import { GetWorkerProperties } from 'scripts/properties';
 import { io } from 'socket.io-client';
 import ServerSocket from 'socket/server-socket';
@@ -16,6 +17,54 @@ import { RegisterExitListeners } from './worker-shutdown';
 
 export let serverAddress = '';
 export let serverBaseAddress = '';
+
+const isPrivateIPv4 = (hostname: string) => {
+	const parts = hostname.split('.').map((part) => Number.parseInt(part, 10));
+	if (parts.length != 4 || parts.some((part) => !Number.isInteger(part))) return false;
+
+	const first = parts[0]!;
+	const second = parts[1]!;
+	return (
+		first == 10 ||
+		first == 127 ||
+		(first == 172 && second >= 16 && second <= 31) ||
+		(first == 192 && second == 168) ||
+		(first == 169 && second == 254)
+	);
+};
+
+const isLocalOrPrivateHost = (hostname: string) => {
+	const normalizedHost = hostname.toLowerCase();
+	const ipVersion = isIP(normalizedHost);
+
+	if (normalizedHost == 'localhost' || normalizedHost == 'host.docker.internal') return true;
+	if (!normalizedHost.includes('.') && ipVersion == 0) return true;
+	if (normalizedHost.endsWith('.local')) return true;
+	if (ipVersion == 4) return isPrivateIPv4(normalizedHost);
+	if (ipVersion == 6) {
+		return (
+			normalizedHost == '::1' ||
+			normalizedHost.startsWith('fc') ||
+			normalizedHost.startsWith('fd') ||
+			normalizedHost.startsWith('fe80')
+		);
+	}
+
+	return false;
+};
+
+export const GetServerBaseAddress = (serverURL: string, serverPort: string) => {
+	const hasPrefix = /^https?:\/\//i.test(serverURL);
+	const url = new URL(`${hasPrefix ? serverURL : 'http://' + serverURL}:${serverPort}`);
+
+	if (url.protocol == 'http:' && !isLocalOrPrivateHost(url.hostname)) {
+		throw new Error(
+			`Remote worker connections to '${url.hostname}' must use HTTPS. Set SERVER_URL with an https:// prefix for public hosts.`
+		);
+	}
+
+	return url.toString().replace(/\/$/, '');
+};
 
 const getWorkerSocketAuth = async (workerID: string) => {
 	const localPrivateKey = process.env.local_private_key;
@@ -79,12 +128,14 @@ export default async function WorkerStartup() {
 
 	// Setup the server ------------------------------------------------------------
 	const serverURL = process.env.SERVER_URL;
-	const serverURLPrefix = serverURL?.match(/^https?:\/\//);
 	const serverPort = process.env.SERVER_PORT;
-	serverBaseAddress = `${serverURLPrefix ? serverURL : 'http://' + serverURL}:${serverPort}`;
-	serverAddress = `${serverBaseAddress}/worker`;
 
 	const canConnect = serverURL != undefined && serverPort != undefined;
+	if (canConnect) {
+		serverBaseAddress = GetServerBaseAddress(serverURL, serverPort);
+		serverAddress = `${serverBaseAddress}/worker`;
+	}
+
 	const server = io(serverAddress, {
 		autoConnect: false,
 		auth: (callback) => {

@@ -3,6 +3,7 @@ import {
 	type AddWatcherType,
 	type DetailedWatcherType,
 	type UpdateWatcherRuleType,
+	type WatcherRuleType,
 } from '@handbrake-web/shared/types/database';
 import { jsonArrayFrom } from 'kysely/helpers/sqlite';
 import logger from 'logging';
@@ -172,6 +173,23 @@ export async function RemoveWatcherRuleFromDatabase(rule_id: number) {
 			`[server] [database] [error] Could not remove a watcher rule with the id '${rule_id}' from the database.`
 		);
 		logger.error(err);
+		throw err;
+	}
+}
+
+export async function DatabaseGetWatcherRuleByID(rule_id: number) {
+	try {
+		const result: WatcherRuleType = await database
+			.selectFrom('watcher_rules')
+			.where('rule_id', '=', rule_id)
+			.selectAll()
+			.executeTakeFirstOrThrow();
+
+		return result;
+	} catch (err) {
+		logger.error(
+			`[server] [database] [error] Could not get watcher rule with id '${rule_id}' from the database.`
+		);
 		throw err;
 	}
 }

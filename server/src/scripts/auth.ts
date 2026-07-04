@@ -28,8 +28,62 @@ const workerAuthEnv = {
 	remotePublicKey: 'remote_public_key',
 };
 const workerChallengeLifetimeMs = 60_000;
+const maxPendingWorkerAuthChallenges = 1000;
+const workerIDRegex = /^[A-Za-z0-9._-]{1,64}$/;
 
 const workerAuthChallenges = new Map<string, WorkerAuthChallenge>();
+
+type RateLimitRecord = {
+	count: number;
+	expiresAt: number;
+};
+
+const createRateLimiter = (maxAttempts: number, windowMs: number) => {
+	const records = new Map<string, RateLimitRecord>();
+
+	const cleanup = () => {
+		const now = Date.now();
+		for (const [key, record] of records.entries()) {
+			if (record.expiresAt <= now) {
+				records.delete(key);
+			}
+		}
+	};
+
+	const limiter = {
+		isLimited(key: string) {
+			cleanup();
+			const record = records.get(key);
+			return record != undefined && record.count >= maxAttempts;
+		},
+		recordFailure(key: string) {
+			cleanup();
+			const now = Date.now();
+			const record = records.get(key);
+			if (!record || record.expiresAt <= now) {
+				records.set(key, { count: 1, expiresAt: now + windowMs });
+				return;
+			}
+
+			record.count += 1;
+		},
+		recordAttempt(key: string) {
+			limiter.recordFailure(key);
+		},
+		reset(key: string) {
+			records.delete(key);
+		},
+	};
+	return limiter;
+};
+
+const httpAuthFailures = createRateLimiter(30, 5 * 60 * 1000);
+const clientSocketAuthFailures = createRateLimiter(20, 5 * 60 * 1000);
+const workerChallengeAttempts = createRateLimiter(120, 60 * 1000);
+
+const getRequestRateLimitKey = (req: Request) => req.socket.remoteAddress || req.ip || 'unknown';
+const getSocketRateLimitKey = (socket: Socket) =>
+	socket.handshake.address || socket.conn.remoteAddress || 'unknown';
 
 const getServerCredentials = (): Credentials | undefined => {
 	const username = process.env[userAuthEnv.username];
@@ -85,6 +139,15 @@ const authenticateUser = (credentials: Credentials | undefined) => {
 	);
 };
 
+const isPlaceholderCredentials = (credentials: Credentials) =>
+	credentials.password == 'change-this-password' ||
+	credentials.password == credentials.username ||
+	(credentials.username == 'admin' && credentials.password == 'admin');
+
+export function IsValidWorkerID(workerID: string) {
+	return workerIDRegex.test(workerID);
+}
+
 export function ValidateAuthConfig() {
 	const credentials = getServerCredentials();
 	const workerKeys = getWorkerAuthKeys();
@@ -101,6 +164,11 @@ export function ValidateAuthConfig() {
 	if (!credentials) {
 		throw new Error(
 			`Missing ${userAuthEnv.username}/${userAuthEnv.password}; server user auth is required.`
+		);
+	}
+	if (isPlaceholderCredentials(credentials)) {
+		throw new Error(
+			`${userAuthEnv.username}/${userAuthEnv.password} must not use placeholder or matching values.`
 		);
 	}
 
@@ -137,6 +205,12 @@ const deleteExpiredWorkerAuthChallenges = () => {
 export function RegisterWorkerAuthRoutes(app: Express) {
 	app.get('/worker/auth/challenge', (req: Request<{}, {}, {}, { workerID?: string }>, res) => {
 		deleteExpiredWorkerAuthChallenges();
+		const rateLimitKey = getRequestRateLimitKey(req);
+		if (workerChallengeAttempts.isLimited(rateLimitKey)) {
+			res.status(429).send('Too many worker auth challenge requests.');
+			return;
+		}
+		workerChallengeAttempts.recordAttempt(rateLimitKey);
 
 		const workerID = req.query.workerID;
 		const workerKeys = getWorkerAuthKeys();
@@ -147,6 +221,14 @@ export function RegisterWorkerAuthRoutes(app: Express) {
 
 		if (!workerID) {
 			res.status(400).send('Missing workerID.');
+			return;
+		}
+		if (!IsValidWorkerID(workerID)) {
+			res.status(400).send('Invalid workerID.');
+			return;
+		}
+		if (workerAuthChallenges.size >= maxPendingWorkerAuthChallenges) {
+			res.status(503).send('Too many pending worker auth challenges.');
 			return;
 		}
 
@@ -171,16 +253,31 @@ export function RegisterWorkerAuthRoutes(app: Express) {
 }
 
 export function RequireHttpAuth(req: Request, res: Response, next: NextFunction) {
+	const rateLimitKey = getRequestRateLimitKey(req);
+	if (httpAuthFailures.isLimited(rateLimitKey)) {
+		res.status(429).send('Too many authentication attempts.');
+		return;
+	}
+
 	if (authenticateUser(parseBasicAuth(req.header('authorization')))) {
+		httpAuthFailures.reset(rateLimitKey);
 		next();
 		return;
 	}
 
+	httpAuthFailures.recordFailure(rateLimitKey);
 	res.setHeader('WWW-Authenticate', 'Basic realm="HandBrake Web"');
 	res.status(401).send('Authentication required.');
 }
 
 export function AuthenticateClientSocket(socket: Socket, next: (err?: ExtendedError) => void) {
+	const rateLimitKey = getSocketRateLimitKey(socket);
+	if (clientSocketAuthFailures.isLimited(rateLimitKey)) {
+		logger.warn(`[socket] Rate limited unauthenticated client connection '${socket.id}'.`);
+		next(new Error('rate limited'));
+		return;
+	}
+
 	const auth = socket.handshake.auth as Partial<Credentials> | undefined;
 
 	if (
@@ -189,10 +286,12 @@ export function AuthenticateClientSocket(socket: Socket, next: (err?: ExtendedEr
 			password: String(auth?.password ?? ''),
 		})
 	) {
+		clientSocketAuthFailures.reset(rateLimitKey);
 		next();
 		return;
 	}
 
+	clientSocketAuthFailures.recordFailure(rateLimitKey);
 	logger.warn(`[socket] Rejected unauthenticated client connection '${socket.id}'.`);
 	next(new Error('unauthorized'));
 }
@@ -204,7 +303,7 @@ export function AuthenticateWorkerSocket(socket: Socket, next: (err?: ExtendedEr
 		| undefined;
 	const workerKeys = getWorkerAuthKeys();
 
-	if (typeof workerID != 'string' || !workerKeys) {
+	if (typeof workerID != 'string' || !IsValidWorkerID(workerID) || !workerKeys) {
 		logger.warn(`[socket] Rejected unauthenticated worker connection '${socket.id}'.`);
 		next(new Error('unauthorized'));
 		return;

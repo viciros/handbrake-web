@@ -29,7 +29,7 @@ import {
 import { DatabaseSelectStatusByID, DatabaseUpdateStatus } from './database/database-status';
 import { GetDefaultPresetByName, GetPresetByName } from './presets';
 import { GetWorkerProperties } from './properties';
-import { AssertPathInMediaRoots } from './path-safety';
+import { AssertExistingPathInMediaRoots, AssertOutputPathInMediaRoots } from './path-safety';
 
 type StartTranscodeAck =
 	| number
@@ -338,8 +338,8 @@ export async function UpdateQueue() {
 
 // Job Actions -------------------------------------------------------------------------------------
 export async function AddJob(data: AddJobType) {
-	AssertPathInMediaRoots(data.input_path, 'job input');
-	AssertPathInMediaRoots(data.output_path, 'job output');
+	data.input_path = await AssertExistingPathInMediaRoots(data.input_path, 'job input');
+	data.output_path = await AssertOutputPathInMediaRoots(data.output_path, 'job output');
 
 	const job = await DatabaseInsertJob(data);
 	if (job) {

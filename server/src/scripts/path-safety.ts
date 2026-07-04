@@ -24,6 +24,11 @@ export function GetMediaRoots() {
 	return unique(roots);
 }
 
+async function GetRealMediaRoots() {
+	const roots = await Promise.all(GetMediaRoots().map((root) => fs.realpath(root)));
+	return unique(roots.map(normalizePath));
+}
+
 export function IsPathInMediaRoots(value: string) {
 	const resolvedPath = normalizePath(value);
 	return GetMediaRoots().some((root) => IsSubPath(root, resolvedPath));
@@ -39,18 +44,39 @@ export function AssertPathInMediaRoots(value: string, label: string) {
 	return resolvedPath;
 }
 
+async function AssertRealPathInMediaRoots(value: string, label: string) {
+	const resolvedPath = normalizePath(value);
+	const realRoots = await GetRealMediaRoots();
+
+	if (!realRoots.some((root) => IsSubPath(root, resolvedPath))) {
+		throw new Error(`${label} '${value}' is outside the configured media roots.`);
+	}
+
+	return resolvedPath;
+}
+
 export async function AssertExistingPathInMediaRoots(value: string, label: string) {
 	const resolvedPath = AssertPathInMediaRoots(value, label);
 	const realPath = await fs.realpath(resolvedPath);
 
-	return AssertPathInMediaRoots(realPath, label);
+	return AssertRealPathInMediaRoots(realPath, label);
+}
+
+export async function AssertExistingDirectoryInMediaRoots(value: string, label: string) {
+	const realPath = await AssertExistingPathInMediaRoots(value, label);
+	const stats = await fs.stat(realPath);
+	if (!stats.isDirectory()) {
+		throw new Error(`${label} '${value}' is not a directory.`);
+	}
+
+	return realPath;
 }
 
 export async function AssertOutputPathInMediaRoots(value: string, label: string) {
 	const resolvedPath = AssertPathInMediaRoots(value, label);
 	const parentPath = await fs.realpath(path.dirname(resolvedPath));
 
-	AssertPathInMediaRoots(parentPath, `${label} parent`);
+	await AssertRealPathInMediaRoots(parentPath, `${label} parent`);
 	return resolvedPath;
 }
 

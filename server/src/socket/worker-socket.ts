@@ -29,10 +29,19 @@ import {
 	UpdateQueue,
 	WorkerForAvailableJobs,
 } from 'scripts/queue';
-import { CreateWorkerTransferLease } from 'scripts/worker-transfers';
+import {
+	ClearCompletedWorkerOutputTransfer,
+	CreateWorkerTransferLease,
+	HasCompletedWorkerOutputTransfer,
+} from 'scripts/worker-transfers';
 import { Server } from 'socket.io';
 
 const workerAckTimeoutMs = 15000;
+const workerTerminalStages = [
+	TranscodeStage.Error,
+	TranscodeStage.Finished,
+	TranscodeStage.Stopped,
+];
 
 export default function WorkerSocket(io: Server) {
 	const namespace = io.of('/worker');
@@ -242,6 +251,7 @@ export default function WorkerSocket(io: Server) {
 				callback();
 				return;
 			}
+			ClearCompletedWorkerOutputTransfer(job_id);
 
 			logger.info(
 				`[socket] Worker '${workerID}' with ID '${socket.id}' has stopped transcoding.`
@@ -272,12 +282,19 @@ export default function WorkerSocket(io: Server) {
 			if (!(await getOwnedJobStatus(job_id, 'transcode-update'))) return;
 
 			const { worker_id: _workerID, ...safeStatus } = status;
+			if (
+				safeStatus.transcode_stage != undefined &&
+				workerTerminalStages.includes(safeStatus.transcode_stage)
+			) {
+				delete safeStatus.transcode_stage;
+			}
 			await DatabaseUpdateJobStatus(job_id, safeStatus);
 			await UpdateQueue();
 		});
 
 		socket.on('transcode-error', async (job_id: number) => {
 			if (!(await getOwnedJobStatus(job_id, 'transcode-error'))) return;
+			ClearCompletedWorkerOutputTransfer(job_id);
 
 			logger.error(
 				`[socket] An error has occurred with job '${job_id}'. The job will be stopped and it's state set to 'Error'.`
@@ -289,9 +306,18 @@ export default function WorkerSocket(io: Server) {
 		socket.on('transcode-finished', async (job_id: number, status: UpdateJobStatusType) => {
 			if (!(await getOwnedJobStatus(job_id, 'transcode-finished'))) return;
 
+			if (!(await HasCompletedWorkerOutputTransfer(workerID, job_id))) {
+				logger.error(
+					`[socket] [error] Worker '${workerID}' reported job '${job_id}' finished before the output upload was verified.`
+				);
+				await StopJob(job_id, true);
+				return;
+			}
+
 			const { worker_id: _workerID, ...safeStatus } = status;
 			await DatabaseUpdateJobStatus(job_id, { ...safeStatus, worker_id: workerID });
 			await DatabaseUpdateJobOrderIndex(job_id, 0);
+			ClearCompletedWorkerOutputTransfer(job_id);
 			await UpdateQueue();
 			await WorkerForAvailableJobs(workerID);
 		});

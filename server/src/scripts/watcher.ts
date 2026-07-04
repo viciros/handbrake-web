@@ -30,6 +30,7 @@ import {
 	DatabaseGetDetailedWatcherByID,
 	DatabaseGetDetailedWatchers,
 	DatabaseGetWatcherIDFromRule,
+	DatabaseGetWatcherRuleByID,
 	DatabaseInsertWatcher,
 	DatabaseInsertWatcherRule,
 	RemoveWatcherFromDatabase,
@@ -48,9 +49,67 @@ import {
 	StartQueue,
 	StopJob,
 } from './queue';
-import { AssertPathInMediaRoots } from './path-safety';
+import {
+	AssertExistingDirectoryInMediaRoots,
+	AssertExistingPathInMediaRoots,
+} from './path-safety';
 
 const watchers: { [index: number]: FSWatcher } = [];
+const maxWatcherRegexLength = 256;
+const regexLiteralRegex =
+	/^\/((?![*+?])(?:[^\r\n\[/\\]|\\.|\[(?:[^\r\n\]\\]|\\.)*\])+)\/((?:g(?:im?|mi?)?|i(?:gm?|mg?)?|m(?:gi?|ig?)?)?)$/;
+const nestedQuantifierRegex =
+	/\((?:[^()\\]|\\.)*(?:[+*]|\{\d+,?\d*\})(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+,?\d*\})/;
+const repeatedAlternationRegex =
+	/\((?:[^()\\]|\\.)+\|(?:[^()\\]|\\.)+\)(?:[+*]|\{\d+,?\d*\})/;
+const backReferenceRegex = /\\[1-9]/;
+
+const parseWatcherRegex = (value: string) => {
+	const splitRegex = value.match(regexLiteralRegex);
+	if (!splitRegex) return undefined;
+
+	return {
+		pattern: splitRegex[1]!,
+		flags: splitRegex[2]!,
+	};
+};
+
+export function AssertSafeWatcherRegex(value: string) {
+	if (value.length > maxWatcherRegexLength) {
+		throw new Error(`Watcher regex is longer than ${maxWatcherRegexLength} characters.`);
+	}
+
+	const parsedRegex = parseWatcherRegex(value);
+	if (!parsedRegex) {
+		throw new Error(`Could not detect a valid regex in the string '${value}'.`);
+	}
+
+	if (
+		nestedQuantifierRegex.test(parsedRegex.pattern) ||
+		repeatedAlternationRegex.test(parsedRegex.pattern) ||
+		backReferenceRegex.test(parsedRegex.pattern)
+	) {
+		throw new Error(`Watcher regex '${value}' is not safe.`);
+	}
+
+	new RegExp(parsedRegex.pattern, parsedRegex.flags);
+	return parsedRegex;
+}
+
+function ValidateWatcherRule(rule: AddWatcherRuleType | UpdateWatcherRuleType) {
+	if (
+		rule.comparison_method == WatcherRuleStringComparisonMethods.RegularExpression &&
+		typeof rule.comparison == 'string'
+	) {
+		AssertSafeWatcherRegex(rule.comparison);
+	}
+}
+
+function ValidateWatcherRules(rules: DetailedWatcherRuleType[]) {
+	for (const rule of rules) {
+		ValidateWatcherRule(rule);
+	}
+}
 
 async function StartQueueIfStopped(watcher: DetailedWatcherType) {
 	const isQueueStopped = (await GetQueueStatus()) == QueueStatus.Stopped;
@@ -75,11 +134,15 @@ function FindMatchingWatcherJob(
 	);
 }
 
-export function RegisterWatcher(watcher: DetailedWatcherType) {
-	AssertPathInMediaRoots(watcher.watch_path, 'watch path');
+export async function RegisterWatcher(watcher: DetailedWatcherType) {
+	watcher.watch_path = await AssertExistingDirectoryInMediaRoots(watcher.watch_path, 'watch path');
 	if (watcher.output_path) {
-		AssertPathInMediaRoots(watcher.output_path, 'watcher output path');
+		watcher.output_path = await AssertExistingDirectoryInMediaRoots(
+			watcher.output_path,
+			'watcher output path'
+		);
 	}
+	ValidateWatcherRules(watcher.rules);
 
 	const newWatcher = chokidar.watch(watcher.watch_path, {
 		awaitWriteFinish: true,
@@ -144,7 +207,7 @@ export async function InitializeWatchers() {
 
 	for await (const watcher of watchers) {
 		try {
-			RegisterWatcher(watcher);
+			await RegisterWatcher(watcher);
 		} catch (err) {
 			logger.error(
 				`[server] [watcher] [error] Watcher '${watcher.watcher_id}' could not be registered.`
@@ -165,12 +228,12 @@ function WatcherRuleStringComparison(
 		case WatcherRuleStringComparisonMethods.EqualTo:
 			return input == value;
 		case WatcherRuleStringComparisonMethods.RegularExpression:
-			const splitRegex = value.match(
-				/\/((?![*+?])(?:[^\r\n\[/\\]|\\.|\[(?:[^\r\n\]\\]|\\.)*\])+)\/((?:g(?:im?|mi?)?|i(?:gm?|mg?)?|m(?:gi?|ig?)?)?)/
-			);
-			if (splitRegex) {
-				return input.match(new RegExp(splitRegex[1], splitRegex[2])) ? true : false;
-			} else {
+			try {
+				const parsedRegex = AssertSafeWatcherRegex(value);
+				return input.match(new RegExp(parsedRegex.pattern, parsedRegex.flags))
+					? true
+					: false;
+			} catch {
 				logger.info(
 					`[server] [watcher] [error] Could not detect a valid regex in the string '${value}'.`
 				);
@@ -213,10 +276,11 @@ function WatcherRuleNumberComparison(
 }
 
 async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: string) {
+	const safeFilePath = await AssertExistingPathInMediaRoots(filePath, 'watcher input');
 	logger.info(
 		`[server] [watcher] Watcher for '${
 			watcher.watch_path
-		}' has detected the creation of the file '${path.basename(filePath)}'.`
+		}' has detected the creation of the file '${path.basename(safeFilePath)}'.`
 	);
 
 	const asyncEvery = async (
@@ -263,20 +327,20 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 						case WatcherRuleBaseMethods.FileInfo:
 							switch (rule.rule_method as WatcherRuleFileInfoMethods) {
 								case WatcherRuleFileInfoMethods.FileName:
-									input = path.parse(filePath).name;
+									input = path.parse(safeFilePath).name;
 									break;
 								case WatcherRuleFileInfoMethods.FileExtension:
-									input = path.parse(filePath).ext;
+									input = path.parse(safeFilePath).ext;
 									break;
 								case WatcherRuleFileInfoMethods.FileSize:
 									input = ConvertBytesToMegabytes(
-										(await fs.stat(filePath)).size
+										(await fs.stat(safeFilePath)).size
 									).toFixed(1);
 									break;
 							}
 							break;
 						case WatcherRuleBaseMethods.MediaInfo:
-							const mediaInfo = await GetMediaInfo(filePath);
+							const mediaInfo = await GetMediaInfo(safeFilePath);
 							const videoStream = mediaInfo.streams.find(
 								(stream) => stream.codec_type == 'video'
 							);
@@ -329,14 +393,14 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 		logger.info(
 			`[server] [watcher] Watcher for '${watcher.watch_path}'s ${
 				Object.keys(watcher.rules).length
-			} rule conditions have not been met for file '${path.basename(filePath)}'`
+			} rule conditions have not been met for file '${path.basename(safeFilePath)}'`
 		);
 		return;
 	}
 
-	const isVideo = mime.getType(filePath);
+	const isVideo = mime.getType(safeFilePath);
 	if (isVideo && isVideo.includes('video')) {
-		const existingJob = FindMatchingWatcherJob(await GetQueue(), watcher, filePath);
+		const existingJob = FindMatchingWatcherJob(await GetQueue(), watcher, safeFilePath);
 		if (existingJob) {
 			switch (existingJob.transcode_stage) {
 				case TranscodeStage.Waiting:
@@ -393,7 +457,7 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 			return;
 		}
 
-		const parsedPath = path.parse(filePath);
+		const parsedPath = path.parse(safeFilePath);
 		const outputPathBase = watcher.output_path ? watcher.output_path : parsedPath.dir;
 		const outputPathName = parsedPath.name;
 		const outputPathFull = path.join(outputPathBase, outputPathName) + outputPathExtension;
@@ -415,7 +479,7 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 		}
 
 		const newJobRequest: AddJobType = {
-			input_path: filePath,
+			input_path: safeFilePath,
 			output_path: checkedOutputItem.path,
 			preset_category: watcher.preset_category,
 			preset_id: watcher.preset_id,
@@ -476,13 +540,16 @@ export async function UpdateWatchers() {
 }
 
 export async function AddWatcher(watcher: AddWatcherType) {
-	AssertPathInMediaRoots(watcher.watch_path, 'watch path');
+	watcher.watch_path = await AssertExistingDirectoryInMediaRoots(watcher.watch_path, 'watch path');
 	if (watcher.output_path) {
-		AssertPathInMediaRoots(watcher.output_path, 'watcher output path');
+		watcher.output_path = await AssertExistingDirectoryInMediaRoots(
+			watcher.output_path,
+			'watcher output path'
+		);
 	}
 
 	const result = await DatabaseInsertWatcher(watcher);
-	RegisterWatcher({ ...result, rules: [] });
+	await RegisterWatcher({ ...result, rules: [] });
 	await UpdateWatchers();
 }
 
@@ -493,19 +560,22 @@ export async function RemoveWatcher(watcherID: number) {
 }
 
 export async function AddWatcherRule(watcherID: number, rule: AddWatcherRuleType) {
+	ValidateWatcherRule(rule);
 	await DeregisterWatcher(watcherID);
 	await DatabaseInsertWatcherRule(watcherID, rule);
 	const updatedWatcher = await DatabaseGetDetailedWatcherByID(watcherID);
-	RegisterWatcher(updatedWatcher);
+	await RegisterWatcher(updatedWatcher);
 	await UpdateWatchers();
 }
 
 export async function UpdateWatcherRule(ruleID: number, rule: UpdateWatcherRuleType) {
 	const watcherID = await DatabaseGetWatcherIDFromRule(ruleID);
+	const existingRule = await DatabaseGetWatcherRuleByID(ruleID);
+	ValidateWatcherRule({ ...existingRule, ...rule });
 	await DeregisterWatcher(watcherID);
 	await UpdateWatcherRuleInDatabase(ruleID, rule);
 	const updatedWatcher = await DatabaseGetDetailedWatcherByID(watcherID);
-	RegisterWatcher(updatedWatcher);
+	await RegisterWatcher(updatedWatcher);
 	await UpdateWatchers();
 }
 
@@ -514,6 +584,6 @@ export async function RemoveWatcherRule(ruleID: number) {
 	await DeregisterWatcher(watcherID);
 	await RemoveWatcherRuleFromDatabase(ruleID);
 	const updatedWatcher = await DatabaseGetDetailedWatcherByID(watcherID);
-	RegisterWatcher(updatedWatcher);
+	await RegisterWatcher(updatedWatcher);
 	await UpdateWatchers();
 }

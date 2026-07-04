@@ -1,5 +1,6 @@
 import { CreateRotatingFileLogger } from '@handbrake-web/shared/logger';
 import { mkdir, readdir, rm, writeFile } from 'fs/promises';
+import { randomBytes } from 'node:crypto';
 import path from 'path';
 import { cwd } from 'process';
 import { IsSubPath, SanitizePathSegment } from './path-safety';
@@ -22,12 +23,15 @@ export async function WriteWorkerLogToFile(workerID: string, logName: string, lo
 		await mkdir(logPath, { recursive: true });
 
 		const safeLogName = SanitizePathSegment(path.basename(logName));
-		const newLogPath = path.resolve(logPath, safeLogName);
+		const safeWorkerID = SanitizePathSegment(workerID);
+		const nonce = randomBytes(8).toString('hex');
+		const serverLogName = `${safeWorkerID}-${Date.now()}-${nonce}-${safeLogName}`;
+		const newLogPath = path.resolve(logPath, serverLogName);
 		if (!IsSubPath(logPath, newLogPath)) {
 			throw new Error(`Worker log path '${newLogPath}' escapes '${logPath}'.`);
 		}
 
-		await writeFile(newLogPath, logContents);
+		await writeFile(newLogPath, logContents, { flag: 'wx' });
 		logger.info(
 			`[log] Log file from worker '${workerID}' has been written to '${newLogPath}'.`
 		);
