@@ -1,6 +1,7 @@
 import type { Database } from '@handbrake-web/shared/types/database';
 import SQLite from 'better-sqlite3';
-import { Kysely, Migrator, ParseJSONResultsPlugin, SqliteDialect } from 'kysely';
+import { Kysely, ParseJSONResultsPlugin, SqliteDialect } from 'kysely';
+import { Migrator } from 'kysely/migration';
 import logger from 'logging';
 import fs from 'node:fs';
 import path from 'node:path';

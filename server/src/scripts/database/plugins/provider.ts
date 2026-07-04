@@ -1,4 +1,4 @@
-import type { Migration, MigrationProvider } from 'kysely';
+import type { Migration, MigrationProvider } from 'kysely/migration';
 
 export class CustomMigrationProvider implements MigrationProvider {
 	async getMigrations(): Promise<Record<string, Migration>> {

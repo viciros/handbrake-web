@@ -18,5 +18,10 @@
     "prod:worker": "cd worker && pnpm prod",
     "git:cleanup": "git checkout main && git fetch --prune && git branch | grep -v 'main' | xargs git branch -D"
   },
+  "pnpm": {
+    "overrides": {
+      "rollup": "4.62.2"
+    }
+  },
   "packageManager": "pnpm@10.16.1"
 }

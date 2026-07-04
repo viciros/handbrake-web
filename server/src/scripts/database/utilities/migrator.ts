@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-import { Migrator } from 'kysely';
+import type { Migrator } from 'kysely/migration';
 import logger from 'logging';
 import { database } from '../database';
 import { DatabaseBackup } from './backup';

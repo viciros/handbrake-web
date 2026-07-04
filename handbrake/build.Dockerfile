@@ -13,7 +13,7 @@ FROM debian:trixie-slim AS handbrake-build
 ARG TARGETARCH
 
 # renovate: datasource=github-releases depName=HandBrake packageName=HandBrake/HandBrake
-ARG HANDBRAKE_VERSION=1.10.2
+ARG HANDBRAKE_VERSION=1.11.2
 
 # Configure APT
 RUN sed -i -e's/ main/ main contrib non-free non-free-firmware/g' \/etc/apt/sources.list.d/debian.sources

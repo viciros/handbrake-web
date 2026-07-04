@@ -22,3 +22,63 @@ updates:
       - dependency-name: '@types/node'
         versions:
           - '>= 25.x'
+
+  - package-ecosystem: 'docker'
+    directory: '/server'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '05:15'
+      timezone: 'America/Los_Angeles'
+    groups:
+      docker-images:
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'docker'
+    directory: '/worker'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '05:15'
+      timezone: 'America/Los_Angeles'
+    groups:
+      docker-images:
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'docker'
+    directory: '/handbrake'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '05:15'
+      timezone: 'America/Los_Angeles'
+    groups:
+      docker-images:
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'docker'
+    directory: '/.devcontainer'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '05:15'
+      timezone: 'America/Los_Angeles'
+    groups:
+      docker-images:
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '05:30'
+      timezone: 'America/Los_Angeles'
+    groups:
+      github-actions:
+        patterns:
+          - '*'
