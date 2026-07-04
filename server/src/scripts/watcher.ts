@@ -349,6 +349,7 @@ async function onWatcherDetectFileAdd(watcher: DetailedWatcherType, filePath: st
 					return;
 				case TranscodeStage.Scanning:
 				case TranscodeStage.Transcoding:
+				case TranscodeStage.Transferring:
 				case TranscodeStage.Unknown:
 					logger.info(
 						`[server] [watcher] Job '${existingJob.job_id}' already exists for '${path.basename(
@@ -449,6 +450,7 @@ async function onWatcherDetectFileDelete(watcher: DetailedWatcherType, filePath:
 					break;
 				case TranscodeStage.Scanning:
 				case TranscodeStage.Transcoding:
+				case TranscodeStage.Transferring:
 				case TranscodeStage.Unknown:
 					logger.info(
 						`[server] [watcher] Watcher for '${watcher.watch_path}' is requesting stop of job '${job.job_id}' because the input file '${filePath}' has been deleted.`

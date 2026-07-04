@@ -1,12 +1,15 @@
-import type {
-	JobType,
-	UpdateJobStatusType,
-} from '@handbrake-web/shared/types/database';
+import type { UpdateJobStatusType } from '@handbrake-web/shared/types/database';
 import { type HandbrakePresetType } from '@handbrake-web/shared/types/preset';
 import { QueueStatus } from '@handbrake-web/shared/types/queue';
 import { IsActiveTranscodeStage, TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import type {
+	WorkerJobData,
+	WorkerTransferLease,
+	WorkerTransferPurpose,
+} from '@handbrake-web/shared/types/worker-transfer';
 import type { WorkerProperties } from '@handbrake-web/shared/types/worker';
 import logger, { logPath, WriteWorkerLogToFile } from 'logging';
+import path from 'path';
 import { AuthenticateWorkerSocket } from 'scripts/auth';
 import { AddWorker, HasWorkerWithID, RemoveWorker } from 'scripts/connections';
 import {
@@ -26,6 +29,7 @@ import {
 	UpdateQueue,
 	WorkerForAvailableJobs,
 } from 'scripts/queue';
+import { CreateWorkerTransferLease } from 'scripts/worker-transfers';
 import { Server } from 'socket.io';
 
 const workerAckTimeoutMs = 15000;
@@ -142,10 +146,7 @@ export default function WorkerSocket(io: Server) {
 						`[socket] [warn] Worker '${workerID}' reported job '${existingJobID}', but the server has that job assigned to '${workerJob.worker_id}'. Stopping the worker's stale transcode state.`
 					);
 					workerCanTakeNewJob = await stopStaleWorkerJob(existingJobID);
-				} else if (
-					workerJob.transcode_stage != TranscodeStage.Scanning &&
-					workerJob.transcode_stage != TranscodeStage.Transcoding
-				) {
+				} else if (!IsActiveTranscodeStage(workerJob.transcode_stage)) {
 					logger.warn(
 						`[socket] [warn] The server's information about job '${workerJob.job_id}' is out of date. Setting the job's state to 'Unknown' until we hear back from the worker again.`
 					);
@@ -172,14 +173,52 @@ export default function WorkerSocket(io: Server) {
 
 		socket.on(
 			'get-job-data',
-			async (jobID: number, callback: (jobData: JobType | undefined) => void) => {
+			async (jobID: number, callback: (jobData: WorkerJobData | undefined) => void) => {
 				if (!(await getOwnedJobStatus(jobID, 'get-job-data'))) {
 					callback(undefined);
 					return;
 				}
 
 				const jobData = await DatabaseGetSimpleJobByID(jobID);
-				callback(jobData);
+				callback({
+					job_id: jobData.job_id,
+					preset_category: jobData.preset_category,
+					preset_id: jobData.preset_id,
+					input_name: path.basename(jobData.input_path),
+					output_name: path.basename(jobData.output_path),
+				});
+			}
+		);
+
+		socket.on(
+			'get-transfer-lease',
+			async (
+				jobID: number,
+				purpose: WorkerTransferPurpose,
+				callback: (lease: WorkerTransferLease | undefined) => void
+			) => {
+				if (purpose != 'input' && purpose != 'output') {
+					logger.warn(
+						`[socket] [warn] Worker '${workerID}' requested an invalid transfer purpose '${purpose}'.`
+					);
+					callback(undefined);
+					return;
+				}
+
+				if (!(await getOwnedJobStatus(jobID, 'get-transfer-lease'))) {
+					callback(undefined);
+					return;
+				}
+
+				try {
+					callback(await CreateWorkerTransferLease(workerID, jobID, purpose));
+				} catch (err) {
+					logger.error(
+						`[socket] [error] Could not create '${purpose}' transfer lease for job '${jobID}'.`
+					);
+					logger.error(err);
+					callback(undefined);
+				}
 			}
 		);
 

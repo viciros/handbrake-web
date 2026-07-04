@@ -80,15 +80,23 @@ The server will be accessible on port `9999` by default. You may change the left
 
 #### `volumes` Mapping
 
+Server:
+
 ```yaml
 volumes:
   - /path/to/your/data:/data
   - /path/to/your/media:/video
 ```
 
-HandBrake Web expects paths to be mapped to `/data` and `/video` on the server, and `/video` on workers. Please update the left-hand side of these mappings to reflect where you wish to have application data stored. It is _not recommended_ to store this data relative to your compose file.
+Worker:
 
-The same media must be mapped to `/video` across the server and _all_ worker instances. See [here](https://github.com/viciros/handbrake-web/wiki/about-volume-mapping) for more information.
+```yaml
+# no /video mount required
+```
+
+HandBrake Web expects `/data` and `/video` to be mapped on the server. Workers no longer need access to the media share; the server streams source files to workers and receives finished outputs back. Workers use their internal temp/data directory while a job is active, so make sure the worker host has enough free space for one input file plus one output file.
+
+See [here](https://github.com/viciros/handbrake-web/wiki/about-volume-mapping) for more information.
 
 #### `environment` Variables
 
@@ -98,11 +106,15 @@ In your server configuration, ensure the following environment variables are pro
 environment:
   - HANDBRAKE_WEB_USERNAME=admin
   - HANDBRAKE_WEB_PASSWORD=change-this-password
-  - HANDBRAKE_WORKER_SECRET=change-this-worker-secret
+  - local_private_key=copy-generated-server-private-key
+  - remote_public_key=copy-generated-worker-public-key
 ```
 
 - `HANDBRAKE_WEB_USERNAME` & `HANDBRAKE_WEB_PASSWORD` - These credentials are required to access the web interface.
-- `HANDBRAKE_WORKER_SECRET` - This shared secret is required for workers to authenticate with the server.
+- `local_private_key` - The server private key.
+- `remote_public_key` - The worker public key trusted by the server.
+
+If `local_private_key` or `remote_public_key` is missing on server startup, the server logs a generated server keypair and worker keypair, then exits. Copy the generated values into your compose file and restart.
 
 In your worker configuration, ensure the following environment variables are properly configured:
 
@@ -111,12 +123,16 @@ environment:
   - WORKER_ID=handbrake-worker
   - SERVER_URL=handbrake-server
   - SERVER_PORT=9999
-  - HANDBRAKE_WORKER_SECRET=change-this-worker-secret
+  - local_private_key=copy-generated-worker-private-key
+  - remote_public_key=copy-generated-server-public-key
 ```
 
 - `WORKER_ID` - This must be unique and not used by any other worker connected to your server.
 - `SERVER_URL` & `SERVER_PORT` - If your worker is not on the same host device as your server, you will need to change these to reflect external access. Prefix with `https://` if using TLS/SSL.
-- `HANDBRAKE_WORKER_SECRET` - This must match the server's `HANDBRAKE_WORKER_SECRET`.
+- `local_private_key` - The worker private key.
+- `remote_public_key` - The server public key trusted by the worker.
+
+Keypair authentication verifies that the worker and server trust each other. It does not encrypt media streams by itself, so remote workers should connect through HTTPS/TLS.
 
 ### Step 3 - Start Containers
 

@@ -60,10 +60,7 @@ export default function QueueCard({
 
 	const percentage = job.transcode_percentage ? job.transcode_percentage * 100 : 0;
 
-	const canStop =
-		job.transcode_stage == TranscodeStage.Scanning ||
-		job.transcode_stage == TranscodeStage.Transcoding ||
-		job.transcode_stage == TranscodeStage.Unknown;
+	const canStop = IsActiveTranscodeStage(job.transcode_stage);
 	const canReset =
 		job.transcode_stage == TranscodeStage.Stopped ||
 		job.transcode_stage == TranscodeStage.Finished ||

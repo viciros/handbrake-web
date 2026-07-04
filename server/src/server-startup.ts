@@ -6,12 +6,13 @@ import { Server as SocketServer } from 'socket.io';
 
 import logger from 'logging';
 import ClientRoutes from 'routes/client';
-import { corsOptions, ValidateAuthConfig } from 'scripts/auth';
+import { corsOptions, RegisterWorkerAuthRoutes, ValidateAuthConfig } from 'scripts/auth';
 import { LoadConfig } from 'scripts/config/config';
 import { DatabaseConnect } from 'scripts/database/database';
 import { LoadDefaultPresets, LoadPresets } from 'scripts/presets';
 import { InitializeQueue } from 'scripts/queue';
 import { CheckForVersionUpdate } from 'scripts/version';
+import { RegisterWorkerTransferRoutes } from 'scripts/worker-transfers';
 import { InitializeWatchers } from 'scripts/watcher';
 import ClientSocket from 'socket/client-socket';
 import WorkerSocket from 'socket/worker-socket';
@@ -44,6 +45,8 @@ export default async function ServerStartup() {
 	app.use(cors(corsOptions));
 
 	// Routes ------------------------------------------------------------------------------
+	RegisterWorkerAuthRoutes(app);
+	RegisterWorkerTransferRoutes(app);
 	ClientRoutes(app);
 
 	// Socket Listeners --------------------------------------------------------------------

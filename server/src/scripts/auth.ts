@@ -1,5 +1,15 @@
-import type { NextFunction, Request, Response } from 'express';
-import { timingSafeEqual } from 'node:crypto';
+import {
+	CreatePrivateKeyFromRawPrivateKey,
+	CreatePublicKeyFromRawPublicKey,
+	GenerateWorkerAuthKeyPair,
+	GetServerChallengePayload,
+	GetWorkerChallengePayload,
+	SignWorkerAuthPayload,
+	VerifyWorkerAuthPayload,
+	type WorkerAuthChallenge,
+} from '@handbrake-web/shared/scripts/worker-auth';
+import type { Express, NextFunction, Request, Response } from 'express';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { ExtendedError, Socket } from 'socket.io';
 
 import logger from 'logging';
@@ -13,7 +23,13 @@ const userAuthEnv = {
 	username: 'HANDBRAKE_WEB_USERNAME',
 	password: 'HANDBRAKE_WEB_PASSWORD',
 };
-const workerSecretEnv = 'HANDBRAKE_WORKER_SECRET';
+const workerAuthEnv = {
+	localPrivateKey: 'local_private_key',
+	remotePublicKey: 'remote_public_key',
+};
+const workerChallengeLifetimeMs = 60_000;
+
+const workerAuthChallenges = new Map<string, WorkerAuthChallenge>();
 
 const getServerCredentials = (): Credentials | undefined => {
 	const username = process.env[userAuthEnv.username];
@@ -24,7 +40,14 @@ const getServerCredentials = (): Credentials | undefined => {
 	return { username, password };
 };
 
-const getWorkerSecret = () => process.env[workerSecretEnv];
+const getWorkerAuthKeys = () => {
+	const localPrivateKey = process.env[workerAuthEnv.localPrivateKey];
+	const remotePublicKey = process.env[workerAuthEnv.remotePublicKey];
+
+	if (!localPrivateKey || !remotePublicKey) return undefined;
+
+	return { localPrivateKey, remotePublicKey };
+};
 
 const safeEqual = (left: string, right: string) => {
 	const leftBuffer = Buffer.from(left);
@@ -64,15 +87,87 @@ const authenticateUser = (credentials: Credentials | undefined) => {
 
 export function ValidateAuthConfig() {
 	const credentials = getServerCredentials();
+	const workerKeys = getWorkerAuthKeys();
+	if (!workerKeys) {
+		LogGeneratedWorkerAuthKeys();
+		if (!credentials) {
+			logger.error(
+				`[auth] Missing ${userAuthEnv.username}/${userAuthEnv.password}; server user auth is required.`
+			);
+		}
+		process.exit(1);
+	}
+
 	if (!credentials) {
 		throw new Error(
 			`Missing ${userAuthEnv.username}/${userAuthEnv.password}; server user auth is required.`
 		);
 	}
 
-	if (!getWorkerSecret()) {
-		throw new Error(`Missing ${workerSecretEnv}; worker shared-secret auth is required.`);
+	CreatePrivateKeyFromRawPrivateKey(workerKeys.localPrivateKey);
+	CreatePublicKeyFromRawPublicKey(workerKeys.remotePublicKey);
+}
+
+function LogGeneratedWorkerAuthKeys() {
+	const serverKeyPair = GenerateWorkerAuthKeyPair();
+	const workerKeyPair = GenerateWorkerAuthKeyPair();
+
+	logger.error(
+		`[auth] Missing ${workerAuthEnv.localPrivateKey}/${workerAuthEnv.remotePublicKey}; worker keypair auth is required.`
+	);
+	logger.info('[auth] Generated server and worker keypairs. Copy these values into compose and restart.');
+	logger.info('[auth] handbrake-server environment:');
+	logger.info(`  - ${workerAuthEnv.localPrivateKey}=${serverKeyPair.privateKey}`);
+	logger.info(`  - ${workerAuthEnv.remotePublicKey}=${workerKeyPair.publicKey}`);
+	logger.info('[auth] handbrake-worker environment:');
+	logger.info(`  - ${workerAuthEnv.localPrivateKey}=${workerKeyPair.privateKey}`);
+	logger.info(`  - ${workerAuthEnv.remotePublicKey}=${serverKeyPair.publicKey}`);
+}
+
+const deleteExpiredWorkerAuthChallenges = () => {
+	const now = Date.now();
+
+	for (const [challengeID, challenge] of workerAuthChallenges.entries()) {
+		if (challenge.expiresAt <= now) {
+			workerAuthChallenges.delete(challengeID);
+		}
 	}
+};
+
+export function RegisterWorkerAuthRoutes(app: Express) {
+	app.get('/worker/auth/challenge', (req: Request<{}, {}, {}, { workerID?: string }>, res) => {
+		deleteExpiredWorkerAuthChallenges();
+
+		const workerID = req.query.workerID;
+		const workerKeys = getWorkerAuthKeys();
+		if (!workerKeys) {
+			res.status(503).send('Worker auth is not configured.');
+			return;
+		}
+
+		if (!workerID) {
+			res.status(400).send('Missing workerID.');
+			return;
+		}
+
+		const unsignedChallenge: WorkerAuthChallenge = {
+			challengeID: randomUUID(),
+			workerID,
+			nonce: randomBytes(32).toString('base64url'),
+			expiresAt: Date.now() + workerChallengeLifetimeMs,
+			serverSignature: '',
+		};
+		const challenge: WorkerAuthChallenge = {
+			...unsignedChallenge,
+			serverSignature: SignWorkerAuthPayload(
+				GetServerChallengePayload(unsignedChallenge),
+				workerKeys.localPrivateKey
+			),
+		};
+
+		workerAuthChallenges.set(challenge.challengeID, challenge);
+		res.json(challenge);
+	});
 }
 
 export function RequireHttpAuth(req: Request, res: Response, next: NextFunction) {
@@ -104,20 +199,44 @@ export function AuthenticateClientSocket(socket: Socket, next: (err?: ExtendedEr
 
 export function AuthenticateWorkerSocket(socket: Socket, next: (err?: ExtendedError) => void) {
 	const workerID = socket.handshake.query['workerID'];
-	const secret = (socket.handshake.auth as { workerSecret?: unknown } | undefined)?.workerSecret;
-	const expectedSecret = getWorkerSecret();
+	const auth = socket.handshake.auth as
+		| { challengeID?: unknown; workerSignature?: unknown }
+		| undefined;
+	const workerKeys = getWorkerAuthKeys();
+
+	if (typeof workerID != 'string' || !workerKeys) {
+		logger.warn(`[socket] Rejected unauthenticated worker connection '${socket.id}'.`);
+		next(new Error('unauthorized'));
+		return;
+	}
+
+	if (typeof auth?.challengeID != 'string' || typeof auth.workerSignature != 'string') {
+		logger.warn(`[socket] Rejected worker '${workerID}' with missing auth challenge.`);
+		next(new Error('unauthorized'));
+		return;
+	}
+
+	const challenge = workerAuthChallenges.get(auth.challengeID);
+	workerAuthChallenges.delete(auth.challengeID);
+
+	if (!challenge || challenge.workerID != workerID || challenge.expiresAt <= Date.now()) {
+		logger.warn(`[socket] Rejected worker '${workerID}' with invalid auth challenge.`);
+		next(new Error('unauthorized'));
+		return;
+	}
 
 	if (
-		typeof workerID == 'string' &&
-		typeof secret == 'string' &&
-		expectedSecret &&
-		safeEqual(secret, expectedSecret)
+		VerifyWorkerAuthPayload(
+			GetWorkerChallengePayload(challenge),
+			auth.workerSignature,
+			workerKeys.remotePublicKey
+		)
 	) {
 		next();
 		return;
 	}
 
-	logger.warn(`[socket] Rejected unauthenticated worker connection '${socket.id}'.`);
+	logger.warn(`[socket] Rejected worker '${workerID}' with invalid auth signature.`);
 	next(new Error('unauthorized'));
 }
 

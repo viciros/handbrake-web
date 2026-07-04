@@ -466,11 +466,7 @@ export async function ResetJob(job_id: number) {
 
 export async function RemoveJob(job_id: number) {
 	const job = await DatabaseGetDetailedJobByID(job_id);
-	if (
-		job.transcode_stage == TranscodeStage.Scanning ||
-		job.transcode_stage == TranscodeStage.Transcoding ||
-		job.transcode_stage == TranscodeStage.Unknown
-	) {
+	if (IsActiveTranscodeStage(job.transcode_stage)) {
 		throw new Error(`Cannot remove active job '${job_id}'. Stop it first.`);
 	}
 

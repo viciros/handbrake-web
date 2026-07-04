@@ -3,7 +3,7 @@ import {
 	formatJSON,
 	type CustomTransportType,
 } from '@handbrake-web/shared/logger';
-import type { JobType, UpdateJobStatusType } from '@handbrake-web/shared/types/database';
+import type { UpdateJobStatusType } from '@handbrake-web/shared/types/database';
 import {
 	type HandbrakeOutputType,
 	type Muxing,
@@ -13,14 +13,23 @@ import {
 } from '@handbrake-web/shared/types/handbrake';
 import { type HandbrakePresetType } from '@handbrake-web/shared/types/preset';
 import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import type {
+	WorkerJobData,
+	WorkerTransferLease,
+	WorkerTransferPurpose,
+} from '@handbrake-web/shared/types/worker-transfer';
 import { spawn, type ChildProcessWithoutNullStreams as ChildProcess } from 'child_process';
-import { access, mkdtemp, realpath, rename, rm, writeFile } from 'fs/promises';
+import { createReadStream, createWriteStream } from 'fs';
+import { mkdtemp, rm, stat, writeFile } from 'fs/promises';
 import logger, { SendLogToServer } from 'logging';
-import { availableParallelism, tmpdir } from 'os';
+import { availableParallelism } from 'os';
 import path from 'path';
 import { env } from 'process';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { Socket } from 'socket.io-client';
-import { getDataPath, getVideoPath } from './data';
+import { serverBaseAddress } from '../worker-startup';
+import { getDataPath } from './data';
 
 export type StartTranscodeResult = {
 	ok: boolean;
@@ -32,49 +41,25 @@ export type StartTranscodeResult = {
 let handbrake: ChildProcess | null = null;
 let startingJobID: number | null = null;
 let stoppingJobID: number | null = null;
+let currentRunPromise: Promise<void> | null = null;
+let activeTransferAbortController: AbortController | null = null;
 
-export const isTranscoding = () => handbrake != null || startingJobID != null;
+export const isTranscoding = () =>
+	handbrake != null || startingJobID != null || currentJobID != null;
 export const isStartingTranscode = () => startingJobID != null;
 
-let currentJob: JobType | null = null;
+let currentJob: WorkerJobData | null = null;
 export let currentJobID: number | null = null;
+let currentWorkspaceDir: string | undefined;
+let currentLocalOutputPath: string | undefined;
 let presetPath: string | undefined;
-let presetDir: string | undefined;
+const cancelledJobIDs = new Set<number>();
 
 type ProgressPhase = 'scanning' | 'processing' | 'muxing';
 
 const displayedProgressScale = 10_000;
 const processCloseTimeoutMs = 15000;
 const getX265ThreadPoolOptions = () => [`pools=${availableParallelism()}`, 'wpp'];
-
-const isSubPath = (parent: string, child: string) => {
-	const relative = path.relative(path.resolve(parent), path.resolve(child));
-	return relative == '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-};
-
-const ensureInputPathIsAllowed = async (inputPath: string) => {
-	const videoRoot = await realpath(getVideoPath());
-	const realInputPath = await realpath(path.resolve(inputPath));
-
-	if (!isSubPath(videoRoot, realInputPath)) {
-		throw new Error(`Input path '${inputPath}' is outside VIDEO_PATH '${getVideoPath()}'.`);
-	}
-
-	await access(realInputPath);
-	return realInputPath;
-};
-
-const ensureOutputPathIsAllowed = async (outputPath: string) => {
-	const videoRoot = await realpath(getVideoPath());
-	const resolvedOutputPath = path.resolve(outputPath);
-	const realOutputParent = await realpath(path.dirname(resolvedOutputPath));
-
-	if (!isSubPath(videoRoot, realOutputParent)) {
-		throw new Error(`Output path '${outputPath}' is outside VIDEO_PATH '${getVideoPath()}'.`);
-	}
-
-	return resolvedOutputPath;
-};
 
 const createProgressNormalizer = () => {
 	const lastProgressByPhase: Partial<Record<ProgressPhase, number>> = {};
@@ -129,23 +114,21 @@ const applyX265ThreadPoolDefaults = (preset: HandbrakePresetType) => ({
 	}),
 });
 
-const writePresetToFile = async (preset: HandbrakePresetType, jobID: number) => {
+const writePresetToFile = async (
+	preset: HandbrakePresetType,
+	jobID: number,
+	workspaceDir: string
+) => {
 	try {
 		const presetString = JSON.stringify(applyX265ThreadPoolDefaults(preset));
-		presetDir = await mkdtemp(path.join(tmpdir(), `handbrake-web-${jobID}-`));
-		presetPath = path.join(presetDir, 'preset.json');
+		presetPath = path.join(workspaceDir, 'preset.json');
 
 		await writeFile(presetPath, presetString, { flag: 'wx' });
-		logger.info(`[worker] Sucessfully wrote preset for job '${jobID}' to file.`);
+		logger.info(`[worker] Successfully wrote preset for job '${jobID}' to file.`);
 	} catch (err) {
 		logger.error(`[worker] [error] Could not write preset to file at ${presetPath}.`);
 		throw err;
 	}
-};
-
-const getTempOutputName = (output: string) => {
-	const outputParsed = path.parse(output);
-	return path.join(outputParsed.dir, outputParsed.name + '.transcoding' + outputParsed.ext);
 };
 
 const logAndSendJobLog = (jobLogger: ReturnType<typeof CreateFileLogger>, socket: Socket) => {
@@ -160,45 +143,27 @@ const logAndSendJobLog = (jobLogger: ReturnType<typeof CreateFileLogger>, socket
 	jobLogger.destroy();
 };
 
-const cleanupTranscodeFiles = async (job: JobType | null, removeTempOutput = true) => {
-	if (job && removeTempOutput) {
-		const tempOutputName = getTempOutputName(job.output_path);
-		try {
-			await access(tempOutputName);
-			await rm(tempOutputName);
-			logger.info(`[transcode] Cleaned up temp file '${path.basename(tempOutputName)}'.`);
-		} catch {
-			// No temp file is fine here; HandBrake may not have created it yet.
-		}
-	}
+const cleanupTranscodeFiles = async (workspaceDir = currentWorkspaceDir) => {
+	if (!workspaceDir) return;
 
-	if (presetPath) {
-		try {
-			await access(presetPath);
-			await rm(presetPath);
-			logger.info(`[transcode] Removed the preset file '${path.basename(presetPath)}'.`);
-		} catch {
-			// Missing preset is also fine during error cleanup.
-		}
-	}
-
-	if (presetDir) {
-		try {
-			await rm(presetDir, { recursive: true, force: true });
-		} catch (err) {
-			logger.warn(`[transcode] [warn] Could not remove preset temp directory '${presetDir}'.`);
-			logger.warn(err);
-		}
+	try {
+		await rm(workspaceDir, { recursive: true, force: true });
+		logger.info(`[transcode] Cleaned up workspace '${path.basename(workspaceDir)}'.`);
+	} catch (err) {
+		logger.warn(`[transcode] [warn] Could not remove workspace '${workspaceDir}'.`);
+		logger.warn(err);
 	}
 };
 
 const clearCurrentJobState = () => {
 	currentJob = null;
 	currentJobID = null;
+	currentWorkspaceDir = undefined;
+	currentLocalOutputPath = undefined;
 	presetPath = undefined;
-	presetDir = undefined;
 	startingJobID = null;
 	stoppingJobID = null;
+	activeTransferAbortController = null;
 };
 
 const waitForProcessClose = async (child: ChildProcess) => {
@@ -218,6 +183,98 @@ const waitForProcessClose = async (child: ChildProcess) => {
 			resolve();
 		});
 	});
+};
+
+const getLocalJobPaths = (job: WorkerJobData, workspaceDir: string) => ({
+	inputPath: path.join(workspaceDir, `input${path.extname(job.input_name) || '.media'}`),
+	outputPath: path.join(workspaceDir, `output${path.extname(job.output_name) || '.mkv'}`),
+});
+
+const getTransferURL = (lease: WorkerTransferLease) =>
+	new URL(lease.path, serverBaseAddress).toString();
+
+const requestTransferLease = async (
+	socket: Socket,
+	jobID: number,
+	purpose: WorkerTransferPurpose
+) => {
+	const lease = (await socket
+		.timeout(15000)
+		.emitWithAck('get-transfer-lease', jobID, purpose)) as WorkerTransferLease | undefined;
+
+	if (!lease || lease.purpose != purpose) {
+		throw new Error(`Could not get '${purpose}' transfer lease for job '${jobID}'.`);
+	}
+
+	return lease;
+};
+
+const downloadInput = async (
+	socket: Socket,
+	jobID: number,
+	destinationPath: string,
+	jobLogger: ReturnType<typeof CreateFileLogger>
+) => {
+	const lease = await requestTransferLease(socket, jobID, 'input');
+	activeTransferAbortController = new AbortController();
+
+	try {
+		jobLogger.info(`[transcode] Downloading input for job '${jobID}'.`);
+		const response = await fetch(getTransferURL(lease), {
+			headers: {
+				Authorization: `Bearer ${lease.token}`,
+			},
+			signal: activeTransferAbortController.signal,
+		});
+
+		if (!response.ok) {
+			throw new Error(`Input download failed with status ${response.status}.`);
+		}
+		if (!response.body) {
+			throw new Error('Input download response did not contain a body.');
+		}
+
+		await pipeline(
+			Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+			createWriteStream(destinationPath, { flags: 'wx' })
+		);
+		jobLogger.info(`[transcode] Finished downloading input for job '${jobID}'.`);
+	} finally {
+		activeTransferAbortController = null;
+	}
+};
+
+const uploadOutput = async (
+	socket: Socket,
+	jobID: number,
+	sourcePath: string,
+	jobLogger: ReturnType<typeof CreateFileLogger>
+) => {
+	const lease = await requestTransferLease(socket, jobID, 'output');
+	const outputStats = await stat(sourcePath);
+	activeTransferAbortController = new AbortController();
+
+	try {
+		jobLogger.info(`[transcode] Uploading output for job '${jobID}'.`);
+		const response = await fetch(getTransferURL(lease), {
+			method: 'PUT',
+			headers: {
+				Authorization: `Bearer ${lease.token}`,
+				'Content-Length': outputStats.size.toString(),
+			},
+			body: createReadStream(sourcePath) as unknown as RequestInit['body'],
+			duplex: 'half',
+			signal: activeTransferAbortController.signal,
+		} as RequestInit & { duplex: 'half' });
+
+		if (!response.ok) {
+			throw new Error(`Output upload failed with status ${response.status}.`);
+		}
+
+		jobLogger.info(`[transcode] Finished uploading output for job '${jobID}'.`);
+	} finally {
+		activeTransferAbortController = null;
+	}
 };
 
 const handleProgressOutput = async (
@@ -287,7 +344,12 @@ const handleProgressOutput = async (
 					const workDone: WorkDone = outputJSON.WorkDone!;
 					markTerminalEventSent();
 
-					if (workDone.Error == 0 && currentJob) {
+					if (workDone.Error == 0 && currentJob && currentLocalOutputPath) {
+						socket.emit('transcode-update', jobID, {
+							transcode_stage: TranscodeStage.Transferring,
+						} satisfies UpdateJobStatusType);
+						await uploadOutput(socket, jobID, currentLocalOutputPath, jobLogger);
+
 						const doneStatus: UpdateJobStatusType = {
 							worker_id: null,
 							transcode_stage: TranscodeStage.Finished,
@@ -296,22 +358,14 @@ const handleProgressOutput = async (
 							transcode_fps_current: 0,
 							time_finished: Date.now(),
 						};
-						const tempOutputName = getTempOutputName(currentJob.output_path);
 
-						await rename(tempOutputName, currentJob.output_path);
-						jobLogger.info(
-							`[transcode] Renamed '${path.basename(tempOutputName)}' to '${path.basename(
-								currentJob.output_path
-							)}'.`
-						);
-
-						await cleanupTranscodeFiles(currentJob, false);
+						await cleanupTranscodeFiles();
 						clearCurrentJobState();
 						socket.emit('transcode-finished', jobID, doneStatus);
 						jobLogger.info(`[transcode] [finished] 100.00%`);
 					} else {
 						jobLogger.error(`[transcode] [error] Finished with error ${workDone.Error}`);
-						await cleanupTranscodeFiles(currentJob);
+						await cleanupTranscodeFiles();
 						clearCurrentJobState();
 						socket.emit('transcode-error', jobID);
 					}
@@ -326,33 +380,26 @@ const handleProgressOutput = async (
 	}
 };
 
-export async function StartTranscode(jobID: number, socket: Socket): Promise<StartTranscodeResult> {
-	if (isTranscoding()) {
-		return {
-			ok: false,
-			currentJobID: currentJobID ?? startingJobID,
-			error: 'Worker is already busy.',
-		};
-	}
-
-	startingJobID = jobID;
+const runTranscode = async (jobID: number, socket: Socket) => {
 	let jobLogger: ReturnType<typeof CreateFileLogger> | undefined;
 	let terminalEventSent = false;
 	let stdoutBuffer = '';
+	let terminalWorkPromise: Promise<void> | undefined;
 
 	try {
-		const jobData: JobType = await socket.timeout(5000).emitWithAck('get-job-data', jobID);
-		jobData.input_path = await ensureInputPathIsAllowed(jobData.input_path);
-		jobData.output_path = await ensureOutputPathIsAllowed(jobData.output_path);
+		const jobData = (await socket
+			.timeout(5000)
+			.emitWithAck('get-job-data', jobID)) as WorkerJobData | undefined;
+		if (!jobData) {
+			throw new Error(`Server did not return job data for job '${jobID}'.`);
+		}
+
 		currentJob = jobData;
 		currentJobID = jobID;
+		currentWorkspaceDir = await mkdtemp(path.join(getDataPath(), `handbrake-web-${jobID}-`));
+		const localPaths = getLocalJobPaths(jobData, currentWorkspaceDir);
+		currentLocalOutputPath = localPaths.outputPath;
 
-		const presetData: HandbrakePresetType = await socket
-			.timeout(5000)
-			.emitWithAck('get-preset-data', jobData.preset_category, jobData.preset_id);
-		await writePresetToFile(presetData, jobID);
-
-		const tempOutputName = getTempOutputName(jobData.output_path);
 		jobLogger = CreateFileLogger(
 			env.WORKER_ID!,
 			`${env.WORKER_ID!}-job-${jobID}`,
@@ -360,15 +407,27 @@ export async function StartTranscode(jobID: number, socket: Socket): Promise<Sta
 		);
 		const normalizeProgress = createProgressNormalizer();
 
+		socket.emit('transcode-update', jobID, {
+			transcode_stage: TranscodeStage.Transferring,
+			time_started: Date.now(),
+		} satisfies UpdateJobStatusType);
+
+		await downloadInput(socket, jobID, localPaths.inputPath, jobLogger);
+
+		const presetData: HandbrakePresetType = await socket
+			.timeout(5000)
+			.emitWithAck('get-preset-data', jobData.preset_category, jobData.preset_id);
+		await writePresetToFile(presetData, jobID, currentWorkspaceDir);
+
 		handbrake = spawn('HandBrakeCLI', [
 			'--preset-import-file',
 			presetPath!,
 			'--preset',
 			jobData.preset_id,
 			'-i',
-			jobData.input_path,
+			localPaths.inputPath,
 			'-o',
-			tempOutputName,
+			localPaths.outputPath,
 			'--json',
 		]);
 		startingJobID = null;
@@ -379,42 +438,53 @@ export async function StartTranscode(jobID: number, socket: Socket): Promise<Sta
 		};
 		socket.emit('transcode-update', jobID, newStatus);
 
-		handbrake.stdout.on('data', async (data) => {
-			stdoutBuffer += data.toString();
-			const jsonRegex = /(^[A-Z][a-z]+):\s({(?:[\n\s+].+\n)+^})/gm;
-			let match: RegExpExecArray | null;
-			let lastIndex = 0;
+		handbrake.stdout.on('data', (data) => {
+			void (async () => {
+				stdoutBuffer += data.toString();
+				const jsonRegex = /(^[A-Z][a-z]+):\s({(?:[\n\s+].+\n)+^})/gm;
+				let match: RegExpExecArray | null;
+				let lastIndex = 0;
 
-			while ((match = jsonRegex.exec(stdoutBuffer)) != null) {
-				lastIndex = jsonRegex.lastIndex;
+				while ((match = jsonRegex.exec(stdoutBuffer)) != null) {
+					lastIndex = jsonRegex.lastIndex;
 
-				try {
-					await handleProgressOutput(
-						jobID,
-						match[1],
-						JSON.parse(match[2]!) as HandbrakeOutputType,
-						socket,
-						jobLogger!,
-						normalizeProgress,
-						() => {
-							terminalEventSent = true;
+					try {
+						const outputJSON = JSON.parse(match[2]!) as HandbrakeOutputType;
+						const workPromise = handleProgressOutput(
+							jobID,
+							match[1],
+							outputJSON,
+							socket,
+							jobLogger!,
+							normalizeProgress,
+							() => {
+								terminalEventSent = true;
+							}
+						);
+
+						if (match[1] == 'Progress' && outputJSON.State == 'WORKDONE') {
+							terminalWorkPromise = workPromise;
 						}
-					);
-				} catch (err) {
-					jobLogger!.error('[transcode] [error] Could not parse/process HandBrake JSON.');
-					jobLogger!.error(err);
-					terminalEventSent = true;
-					await cleanupTranscodeFiles(currentJob);
-					clearCurrentJobState();
-					socket.emit('transcode-error', jobID);
-				}
-			}
 
-			if (lastIndex > 0) {
-				stdoutBuffer = stdoutBuffer.slice(lastIndex);
-			} else if (stdoutBuffer.length > 100000) {
-				stdoutBuffer = stdoutBuffer.slice(-10000);
-			}
+						await workPromise;
+					} catch (err) {
+						jobLogger!.error('[transcode] [error] Could not parse/process HandBrake JSON.');
+						jobLogger!.error(err);
+						terminalEventSent = true;
+						await cleanupTranscodeFiles();
+						clearCurrentJobState();
+						if (!cancelledJobIDs.has(jobID)) {
+							socket.emit('transcode-error', jobID);
+						}
+					}
+				}
+
+				if (lastIndex > 0) {
+					stdoutBuffer = stdoutBuffer.slice(lastIndex);
+				} else if (stdoutBuffer.length > 100000) {
+					stdoutBuffer = stdoutBuffer.slice(-10000);
+				}
+			})();
 		});
 
 		handbrake.stderr.on('data', (data) => {
@@ -428,14 +498,21 @@ export async function StartTranscode(jobID: number, socket: Socket): Promise<Sta
 
 		handbrake.on('close', async (code, signal) => {
 			try {
-				if (!terminalEventSent && stoppingJobID == null) {
+				if (terminalWorkPromise) {
+					await terminalWorkPromise.catch(() => undefined);
+				}
+
+				if (
+					!terminalEventSent &&
+					stoppingJobID == null &&
+					!cancelledJobIDs.has(jobID)
+				) {
 					jobLogger!.error(
 						`[transcode] [error] HandBrake closed before WORKDONE with code '${code}' and signal '${signal}'.`
 					);
-					await cleanupTranscodeFiles(currentJob);
-					const failedJobID = currentJobID;
+					await cleanupTranscodeFiles();
 					clearCurrentJobState();
-					if (failedJobID) socket.emit('transcode-error', failedJobID);
+					socket.emit('transcode-error', jobID);
 				}
 			} finally {
 				handbrake = null;
@@ -443,33 +520,60 @@ export async function StartTranscode(jobID: number, socket: Socket): Promise<Sta
 				logAndSendJobLog(jobLogger!, socket);
 			}
 		});
-
-		return { ok: true, jobID };
 	} catch (err) {
-		logger.error(`[transcode] [error] Could not start job '${jobID}'.`);
+		logger.error(`[transcode] [error] Could not run job '${jobID}'.`);
 		logger.error(err);
-		await cleanupTranscodeFiles(currentJob);
+		jobLogger?.error(`[transcode] [error] Could not run job '${jobID}'.`);
+		jobLogger?.error(err);
+		await cleanupTranscodeFiles();
 		clearCurrentJobState();
 		handbrake = null;
+
+		if (!cancelledJobIDs.has(jobID)) {
+			socket.emit('transcode-error', jobID);
+		}
+
 		jobLogger?.destroy();
-		socket.emit('transcode-error', jobID);
-		return { ok: false, currentJobID: null, error: err instanceof Error ? err.message : String(err) };
 	}
+};
+
+export async function StartTranscode(jobID: number, socket: Socket): Promise<StartTranscodeResult> {
+	if (isTranscoding()) {
+		return {
+			ok: false,
+			currentJobID: currentJobID ?? startingJobID,
+			error: 'Worker is already busy.',
+		};
+	}
+
+	startingJobID = jobID;
+	currentJobID = jobID;
+	currentRunPromise = runTranscode(jobID, socket).finally(() => {
+		currentRunPromise = null;
+		cancelledJobIDs.delete(jobID);
+	});
+
+	return { ok: true, jobID };
 }
 
 export async function StopTranscode(id: number, socket: Socket) {
-	if (!handbrake || !currentJob || currentJobID != id) {
+	if (currentJobID != id && startingJobID != id) {
 		logger.warn(
 			`[transcode] [warn] Stop request for job '${id}' ignored; current job is '${currentJobID}'.`
 		);
 		return;
 	}
 
+	cancelledJobIDs.add(id);
 	stoppingJobID = id;
-	const stoppedJob = currentJob;
+	const stoppedWorkspaceDir = currentWorkspaceDir;
 
-	handbrake.kill('SIGTERM');
-	await waitForProcessClose(handbrake);
+	activeTransferAbortController?.abort();
+
+	if (handbrake) {
+		handbrake.kill('SIGTERM');
+		await waitForProcessClose(handbrake);
+	}
 
 	if (socket.connected) {
 		logger.info(`[transcode] Informing the server that job '${id}' has been stopped.`);
@@ -481,7 +585,7 @@ export async function StopTranscode(id: number, socket: Socket) {
 		);
 	}
 
-	await cleanupTranscodeFiles(stoppedJob);
+	await cleanupTranscodeFiles(stoppedWorkspaceDir);
 	clearCurrentJobState();
 	handbrake = null;
 }
