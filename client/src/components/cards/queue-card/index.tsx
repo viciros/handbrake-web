@@ -182,6 +182,9 @@ export default function QueueCard({
 		job.time_started && job.time_finished && job.time_finished >= job.time_started
 			? secondsToTime((job.time_finished - job.time_started) / 1000)
 			: 'N/A';
+	const averageFps = job.transcode_fps_average
+		? `${job.transcode_fps_average.toFixed(1)}fps`
+		: 'N/A';
 
 	return (
 		<div
@@ -219,6 +222,9 @@ export default function QueueCard({
 							{job.worker_id ? job.worker_id : 'N/A'}
 						</QueueCardSection>
 						<QueueCardSection label='Duration'>{transcodeDuration}</QueueCardSection>
+						{job.transcode_stage == TranscodeStage.Finished && (
+							<QueueCardSection label='Avg. FPS'>{averageFps}</QueueCardSection>
+						)}
 						<QueueCardSection label='Status'>
 							{TranscodeStage[job.transcode_stage ? job.transcode_stage : 0]}
 							{(job.transcode_stage == TranscodeStage.Finished ||
@@ -244,9 +250,7 @@ export default function QueueCard({
 									: 'N/A'}
 							</QueueCardSection>
 							<QueueCardSection label='Avg. FPS'>
-								{job.transcode_fps_average
-									? `${job.transcode_fps_average.toFixed(1)}fps`
-									: 'N/A'}
+								{averageFps}
 							</QueueCardSection>
 							<QueueCardSection label='Time Elapsed'>
 								{job.time_started
