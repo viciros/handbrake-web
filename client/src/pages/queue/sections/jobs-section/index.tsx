@@ -1,5 +1,5 @@
 import { QueueStatus, QueueType } from '@handbrake-web/shared/types/queue';
-import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import { IsActiveTranscodeStage, TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import ClearAllIcon from '@icons/check2-all.svg?react';
 import ClearFinishedIcon from '@icons/check2.svg?react';
 import AddNewIcon from '@icons/plus-lg.svg?react';
@@ -31,11 +31,8 @@ export default function JobsSection({
 }: Params) {
 	const { connections, queueStatus } = useContext(PrimaryContext)!;
 
-	const jobsInProgress: QueueType = queue.filter(
-		(job) =>
-			job.transcode_stage == TranscodeStage.Transcoding ||
-			job.transcode_stage == TranscodeStage.Scanning ||
-			job.transcode_stage == TranscodeStage.Unknown
+	const jobsInProgress: QueueType = queue.filter((job) =>
+		IsActiveTranscodeStage(job.transcode_stage)
 	);
 
 	const jobsWaiting: QueueType = queue.filter(
@@ -71,7 +68,11 @@ export default function JobsSection({
 			</div>
 			{jobsWaiting.length > 0 &&
 				connections.workers.filter((worker) => {
-					const workerJob = queue.find((job) => job.worker_id == worker.workerID);
+					const workerJob = queue.find(
+						(job) =>
+							job.worker_id == worker.workerID &&
+							IsActiveTranscodeStage(job.transcode_stage)
+					);
 
 					return workerJob == null;
 				}).length > 0 &&

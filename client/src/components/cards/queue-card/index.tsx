@@ -1,5 +1,5 @@
 import { DetailedJobType } from '@handbrake-web/shared/types/database';
-import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import { IsActiveTranscodeStage, TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import ResetIcon from '@icons/arrow-counterclockwise.svg?react';
 import LogIcon from '@icons/file-text-fill.svg?react';
 import ListIcon from '@icons/list.svg?react';
@@ -176,12 +176,15 @@ export default function QueueCard({
 		const hours = Math.floor(seconds / 3600);
 		const minutes = Math.floor((seconds % 3600) / 60);
 		const newSeconds = Math.floor((seconds % 3600) % 60);
-		return (
-			(hours > 0 ? `${hours}h` : '') +
-			(minutes > 0 ? `${minutes}m` : '') +
-			(newSeconds >= 0 ? `${newSeconds}s` : 'N/A')
-		);
+		return [hours, minutes, newSeconds]
+			.map((value) => value.toString().padStart(2, '0'))
+			.join(':');
 	};
+
+	const transcodeDuration =
+		job.time_started && job.time_finished && job.time_finished >= job.time_started
+			? secondsToTime((job.time_finished - job.time_started) / 1000)
+			: 'N/A';
 
 	return (
 		<div
@@ -218,6 +221,7 @@ export default function QueueCard({
 						<QueueCardSection label='Worker'>
 							{job.worker_id ? job.worker_id : 'N/A'}
 						</QueueCardSection>
+						<QueueCardSection label='Duration'>{transcodeDuration}</QueueCardSection>
 						<QueueCardSection label='Status'>
 							{TranscodeStage[job.transcode_stage ? job.transcode_stage : 0]}
 							{(job.transcode_stage == TranscodeStage.Finished ||
@@ -235,8 +239,7 @@ export default function QueueCard({
 							)}
 						</QueueCardSection>
 					</div>
-					{(job.transcode_stage == TranscodeStage.Scanning ||
-						job.transcode_stage == TranscodeStage.Transcoding) && (
+					{IsActiveTranscodeStage(job.transcode_stage) && (
 						<div className={styles['info']}>
 							<QueueCardSection label='FPS'>
 								{job.transcode_fps_current

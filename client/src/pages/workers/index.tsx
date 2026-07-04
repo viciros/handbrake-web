@@ -1,3 +1,4 @@
+import { IsActiveTranscodeStage } from '@handbrake-web/shared/types/transcode';
 import { WorkerProperties } from '@handbrake-web/shared/types/worker';
 import { useContext } from 'react';
 import Page from '~components/root/page';
@@ -20,7 +21,10 @@ export default function WorkersPage() {
 
 	const workerInfo: WorkerInfoMap = Object.fromEntries(
 		connections.workers.map((worker) => {
-			const job = queue.find((job) => job.worker_id == worker.workerID);
+			const job = queue.find(
+				(job) =>
+					job.worker_id == worker.workerID && IsActiveTranscodeStage(job.transcode_stage)
+			);
 			return [
 				worker.workerID,
 				{

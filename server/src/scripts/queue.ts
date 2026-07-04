@@ -2,7 +2,7 @@ import { QueueStartupBehavior } from '@handbrake-web/shared/types/config';
 import type { AddJobType, DetailedJobType } from '@handbrake-web/shared/types/database';
 import type { HandbrakePresetDataType } from '@handbrake-web/shared/types/preset';
 import { QueueStatus } from '@handbrake-web/shared/types/queue';
-import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import { IsActiveTranscodeStage, TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import type { WorkerCapabilities } from '@handbrake-web/shared/types/worker';
 import logger, { RemoveJobLogByID } from 'logging';
 import { Socket as Worker } from 'socket.io';
@@ -84,11 +84,7 @@ export async function InitializeQueue() {
 	// Queue Data
 	const queue = await DatabaseGetDetailedJobs();
 	for (const job of queue) {
-		if (
-			job.worker_id != null ||
-			job.transcode_stage == TranscodeStage.Scanning ||
-			job.transcode_stage == TranscodeStage.Transcoding
-		) {
+		if (IsActiveTranscodeStage(job.transcode_stage)) {
 			await DatabaseUpdateJobStatus(job.job_id, { transcode_stage: TranscodeStage.Unknown });
 
 			logger.info(
@@ -100,9 +96,13 @@ export async function InitializeQueue() {
 }
 
 export async function GetBusyWorkers() {
-	const busyWorkers = [...new Set((await GetQueue()).map((job) => job.worker_id))].filter(
-		(value) => value != null
-	);
+	const busyWorkers = [
+		...new Set(
+			(await GetQueue())
+				.filter((job) => IsActiveTranscodeStage(job.transcode_stage))
+				.map((job) => job.worker_id)
+		),
+	].filter((value) => value != null);
 
 	return busyWorkers;
 }

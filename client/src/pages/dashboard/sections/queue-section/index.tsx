@@ -12,6 +12,9 @@ interface Properties {
 }
 
 export default function QueueSection({ queue }: Properties) {
+	const formatFinishedAt = (timeFinished: number) =>
+		timeFinished ? new Date(timeFinished).toLocaleString() : 'N/A';
+
 	return (
 		<Section className={styles['queue']} heading='Queue' link='/queue'>
 			<DashboardTable>
@@ -20,7 +23,9 @@ export default function QueueSection({ queue }: Properties) {
 						<th>#</th>
 						<th>Input</th>
 						<th>Output</th>
+						<th>Worker</th>
 						<th>Status</th>
+						<th>Finished</th>
 						<th>Progress</th>
 					</tr>
 				</thead>
@@ -84,6 +89,7 @@ export default function QueueSection({ queue }: Properties) {
 										{job.output_path.match(/[^/]+$/)}
 										<BadgeInfo info={job.output_path} />
 									</td>
+									<td align='center'>{job.worker_id || 'N/A'}</td>
 									<td
 										align='center'
 										data-status={TranscodeStage[
@@ -92,6 +98,7 @@ export default function QueueSection({ queue }: Properties) {
 									>
 										{TranscodeStage[job.transcode_stage || 0]}
 									</td>
+									<td align='center'>{formatFinishedAt(job.time_finished)}</td>
 									<td className={styles['progress']}>
 										<ProgressBar
 											className={styles['percentage']}

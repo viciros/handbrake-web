@@ -1,5 +1,6 @@
 import { QueueType } from '@handbrake-web/shared/types/queue';
 import { WorkerIDType } from '@handbrake-web/shared/types/socket';
+import { IsActiveTranscodeStage } from '@handbrake-web/shared/types/transcode';
 import { WorkerPropertiesMap } from '@handbrake-web/shared/types/worker';
 import Section from '~components/root/section';
 import DashboardTable from '~pages/dashboard/components/dashboard-table';
@@ -26,7 +27,11 @@ export default function WorkersSection({ queue, workers, properties }: Propertie
 				</thead>
 				<tbody>
 					{workers.map((worker) => {
-						const status = queue.find((job) => job.worker_id == worker.workerID)
+						const status = queue.find(
+							(job) =>
+								job.worker_id == worker.workerID &&
+								IsActiveTranscodeStage(job.transcode_stage)
+						)
 							? 'Working'
 							: 'Idle';
 						const workerProperties = properties[worker.workerID];

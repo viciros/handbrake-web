@@ -4,7 +4,7 @@ import type {
 } from '@handbrake-web/shared/types/database';
 import { type HandbrakePresetType } from '@handbrake-web/shared/types/preset';
 import { QueueStatus } from '@handbrake-web/shared/types/queue';
-import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import { IsActiveTranscodeStage, TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import type { WorkerProperties } from '@handbrake-web/shared/types/worker';
 import logger, { logPath, WriteWorkerLogToFile } from 'logging';
 import { AuthenticateWorkerSocket } from 'scripts/auth';
@@ -63,7 +63,10 @@ export default function WorkerSocket(io: Server) {
 			RemoveWorkerProperties(workerID);
 
 			const queue = await GetQueue();
-			const workersJob = queue.find((job) => job.worker_id == workerID);
+			const workersJob = queue.find(
+				(job) =>
+					job.worker_id == workerID && IsActiveTranscodeStage(job.transcode_stage)
+			);
 			if (workersJob) {
 				logger.info(
 					`[socket] Disconnected worker '${workerID}' was working on job '${workersJob.job_id}' when disconnected - setting job to 'unknown'.`
@@ -248,7 +251,7 @@ export default function WorkerSocket(io: Server) {
 			if (!(await getOwnedJobStatus(job_id, 'transcode-finished'))) return;
 
 			const { worker_id: _workerID, ...safeStatus } = status;
-			await DatabaseUpdateJobStatus(job_id, { ...safeStatus, worker_id: null });
+			await DatabaseUpdateJobStatus(job_id, { ...safeStatus, worker_id: workerID });
 			await DatabaseUpdateJobOrderIndex(job_id, 0);
 			await UpdateQueue();
 			await WorkerForAvailableJobs(workerID);
