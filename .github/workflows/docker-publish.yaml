@@ -1,6 +1,17 @@
 name: Docker Publish
 
 on:
+  workflow_dispatch:
+    inputs:
+      handbrake_base:
+        description: How to handle the HandBrake base image for this manual run.
+        required: true
+        default: force
+        type: choice
+        options:
+          - auto
+          - force
+          - reuse
   push:
     branches:
       - dev
@@ -75,11 +86,18 @@ jobs:
           set -euo pipefail
 
           event_name="${{ github.event_name }}"
+          manual_base="${{ github.event_name == 'workflow_dispatch' && inputs.handbrake_base || 'auto' }}"
           build_tag="${{ github.ref_name }}"
           reuse_tag="${{ github.ref_name }}"
           should_build=false
 
-          if [[ "$event_name" == "release" ]]; then
+          if [[ "$event_name" == "workflow_dispatch" && "$manual_base" == "force" ]]; then
+            echo "Manual run requested a HandBrake base rebuild."
+            should_build=true
+          elif [[ "$event_name" == "workflow_dispatch" && "$manual_base" == "reuse" ]]; then
+            echo "Manual run requested reuse of the existing HandBrake base image."
+            should_build=false
+          elif [[ "$event_name" == "release" ]]; then
             build_tag="latest"
             reuse_tag="$HANDBRAKE_VERSION"
             previous_tag="$(git tag --sort=-creatordate | grep -Fvx -- '${{ github.ref_name }}' | head -n 1 || true)"
@@ -97,11 +115,17 @@ jobs:
             base_sha="${{ github.event.pull_request.base.sha }}"
             head_sha="${{ github.event.pull_request.head.sha }}"
           else
-            base_sha="${{ github.event.before }}"
+            if [[ "$event_name" == "workflow_dispatch" ]]; then
+              base_sha="$(git rev-parse HEAD^ 2>/dev/null || true)"
+            else
+              base_sha="${{ github.event.before }}"
+            fi
             head_sha="${{ github.sha }}"
           fi
 
-          if [[ "$should_build" != "true" ]]; then
+          if [[ "$event_name" == "workflow_dispatch" && "$manual_base" == "reuse" ]]; then
+            :
+          elif [[ "$should_build" != "true" ]]; then
             if [[ "$base_sha" =~ ^0+$ ]]; then
               echo "No usable base SHA found; the HandBrake base will be built."
               should_build=true

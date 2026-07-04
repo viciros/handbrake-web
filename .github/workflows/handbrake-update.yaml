@@ -1,6 +1,7 @@
 name: Update HandBrake
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 12 * * 1' # runs weekly on monday at 5AM PST
   push:
