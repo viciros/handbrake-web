@@ -44,8 +44,81 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  build-handbrake-base:
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.image-tag.outputs.tag }}
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Get HandBrake version
+        run: cat handbrake/build.Dockerfile | grep -oP '(?<=ARG\s)(HANDBRAKE_VERSION=.+)' >> $GITHUB_ENV
+
+      - name: Check for version env variable
+        if: ${{ env.HANDBRAKE_VERSION == '' }}
+        run: |
+          echo "Critical environment variable 'HANDBRAKE_VERSION' does not exist. Exiting job with error."
+          exit 1
+
+      - name: Determine HandBrake image tag
+        id: image-tag
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            tag="latest"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            tag="pr-${{ github.event.number }}"
+          else
+            tag="${{ github.ref_name }}"
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/handbrake-build
+          tags: |
+            type=raw,value=${{ steps.image-tag.outputs.tag }}
+            type=raw,value=${{ env.HANDBRAKE_VERSION }},enable=${{ github.event_name == 'release' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: handbrake/build.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=handbrake-build
+          cache-to: type=gha,mode=max,scope=handbrake-build
+
   build-handbrake-web:
     runs-on: ubuntu-latest
+    needs: build-handbrake-base
+
     strategy:
       fail-fast: false
       matrix:
@@ -64,16 +137,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -94,7 +167,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ matrix.image }}
           tags: |
@@ -105,39 +178,16 @@ jobs:
             type=semver,pattern={{version}},enable=${{ github.event_name == 'release' }}
             type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name == 'release' }}
 
-      - name: Wait handbrake-build to finish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Checking for the job 'handbrake-build' at '/repos/${{ github.repository }}/commits/${{ github.head_ref || github.ref }}/check-runs'" && \
-          if [[ -z $( \
-            gh api /repos/${{ github.repository }}/commits/${{ github.head_ref || github.ref }}/check-runs | \
-            jq '.check_runs[] | select(.name=="handbrake-build")' \
-          ) ]]; then \
-            echo "The job 'handbrake-build' does not exist for this job."; \
-          else \
-            echo HANDBRAKE_BUILD=true >> $GITHUB_ENV && \
-            until [[ $( \
-                gh api /repos/${{ github.repository }}/commits/${{ github.head_ref || github.ref }}/check-runs | \
-                jq -r '.check_runs[] | select(.name=="handbrake-build") | .status' \
-              ) = "completed" \
-            ]]; \
-            do \
-              echo "Waiting for the job 'handbrake-build' to finish, checking again in 10s..." && sleep 10s; \
-            done; \
-            echo "The job 'handbrake-build' has finished!"; \
-          fi;
-
       - name: Build and push Docker image
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.file }}
           platforms: linux/amd64,linux/arm64
           build-args: |
             DISTROLESS_VARIANT=${{ github.head_ref == '' && 'nonroot' || 'debug-nonroot' }}
-            HANDBRAKE_BUILD_TAG=${{ (env.HANDBRAKE_BUILD && github.event_name == 'pull_request') && format('pr-{0}', github.event.number) || 'latest'}}
+            HANDBRAKE_BUILD_TAG=${{ needs.build-handbrake-base.outputs.tag }}
             APP_VERSION=${{ steps.app-version.outputs.version }}
           provenance: false
           push: true
@@ -148,7 +198,7 @@ jobs:
 
       # This step generates an artifact attestation for the image, which is an unforgeable statement about where and how it was built. It increases supply chain security for people who consume the image. For more information, see "[AUTOTITLE](/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)."
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.REPO_OWNER}}/${{ matrix.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
