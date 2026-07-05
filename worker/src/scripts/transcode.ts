@@ -25,7 +25,7 @@ import logger, { SendLogToServer } from 'logging';
 import { availableParallelism } from 'os';
 import path from 'path';
 import { env } from 'process';
-import { Readable } from 'stream';
+import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { Socket } from 'socket.io-client';
 import { serverBaseAddress } from '../worker-startup';
@@ -59,6 +59,7 @@ type ProgressPhase = 'scanning' | 'processing' | 'muxing';
 
 const displayedProgressScale = 10_000;
 const processCloseTimeoutMs = 15000;
+const transferProgressUpdateIntervalMs = 500;
 const getX265ThreadPoolOptions = () => [`pools=${availableParallelism()}`, 'wpp'];
 
 const createProgressNormalizer = () => {
@@ -209,6 +210,90 @@ const requestTransferLease = async (
 	return lease;
 };
 
+const getChunkByteLength = (chunk: unknown, encoding: BufferEncoding) => {
+	if (typeof chunk == 'string') return Buffer.byteLength(chunk, encoding);
+	if (chunk instanceof Uint8Array) return chunk.byteLength;
+
+	return 0;
+};
+
+const normalizeContentLength = (value: number | string | null | undefined) => {
+	const contentLength =
+		typeof value == 'number'
+			? value
+			: typeof value == 'string'
+			? Number.parseInt(value, 10)
+			: undefined;
+
+	if (contentLength == undefined || !Number.isSafeInteger(contentLength) || contentLength < 0) {
+		return undefined;
+	}
+
+	return contentLength;
+};
+
+const emitTransferProgress = (socket: Socket, jobID: number, progress: number) => {
+	const clampedProgress = Math.min(Math.max(progress, 0), 1);
+	const displayedProgress =
+		Math.round(clampedProgress * displayedProgressScale) / displayedProgressScale;
+
+	socket.emit('transcode-update', jobID, {
+		transcode_stage: TranscodeStage.Transferring,
+		transcode_percentage: displayedProgress,
+		transcode_eta: 0,
+		transcode_fps_current: 0,
+	} satisfies UpdateJobStatusType);
+};
+
+const createTransferProgressTransform = (
+	socket: Socket,
+	jobID: number,
+	totalBytes: number | undefined
+) => {
+	let transferredBytes = 0;
+	let lastUpdateAt = 0;
+	let lastDisplayedProgress = -1;
+
+	const emitProgress = (force = false) => {
+		const progress = totalBytes && totalBytes > 0 ? transferredBytes / totalBytes : 0;
+		const displayedProgress = Math.round(
+			Math.min(Math.max(progress, 0), 1) * displayedProgressScale
+		);
+		const now = Date.now();
+
+		if (
+			!force &&
+			(displayedProgress <= lastDisplayedProgress ||
+				now - lastUpdateAt < transferProgressUpdateIntervalMs)
+		) {
+			return;
+		}
+
+		lastUpdateAt = now;
+		lastDisplayedProgress = displayedProgress;
+		emitTransferProgress(socket, jobID, displayedProgress / displayedProgressScale);
+	};
+
+	emitProgress(true);
+
+	return new Transform({
+		transform(chunk, encoding: BufferEncoding, callback) {
+			transferredBytes += getChunkByteLength(chunk, encoding);
+			emitProgress();
+			callback(null, chunk);
+		},
+		flush(callback) {
+			if (totalBytes == undefined || totalBytes <= 0) {
+				emitTransferProgress(socket, jobID, 1);
+			} else {
+				transferredBytes = totalBytes;
+				emitProgress(true);
+			}
+			callback();
+		},
+	});
+};
+
 const downloadInput = async (
 	socket: Socket,
 	jobID: number,
@@ -234,8 +319,13 @@ const downloadInput = async (
 			throw new Error('Input download response did not contain a body.');
 		}
 
+		const totalBytes = normalizeContentLength(
+			lease.contentLength ?? response.headers.get('content-length')
+		);
+
 		await pipeline(
 			Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+			createTransferProgressTransform(socket, jobID, totalBytes),
 			createWriteStream(destinationPath, { flags: 'wx' })
 		);
 		jobLogger.info(`[transcode] Finished downloading input for job '${jobID}'.`);
@@ -262,7 +352,9 @@ const uploadOutput = async (
 				Authorization: `Bearer ${lease.token}`,
 				'Content-Length': outputStats.size.toString(),
 			},
-			body: createReadStream(sourcePath) as unknown as RequestInit['body'],
+			body: createReadStream(sourcePath).pipe(
+				createTransferProgressTransform(socket, jobID, outputStats.size)
+			) as unknown as RequestInit['body'],
 			duplex: 'half',
 			signal: activeTransferAbortController.signal,
 		} as RequestInit & { duplex: 'half' });
@@ -347,6 +439,9 @@ const handleProgressOutput = async (
 					if (workDone.Error == 0 && currentJob && currentLocalOutputPath) {
 						socket.emit('transcode-update', jobID, {
 							transcode_stage: TranscodeStage.Transferring,
+							transcode_percentage: 0,
+							transcode_eta: 0,
+							transcode_fps_current: 0,
 						} satisfies UpdateJobStatusType);
 						await uploadOutput(socket, jobID, currentLocalOutputPath, jobLogger);
 
@@ -409,6 +504,9 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 
 		socket.emit('transcode-update', jobID, {
 			transcode_stage: TranscodeStage.Transferring,
+			transcode_percentage: 0,
+			transcode_eta: 0,
+			transcode_fps_current: 0,
 			time_started: Date.now(),
 		} satisfies UpdateJobStatusType);
 
