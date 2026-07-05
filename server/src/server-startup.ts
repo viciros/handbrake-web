@@ -18,6 +18,25 @@ import ClientSocket from 'socket/client-socket';
 import WorkerSocket from 'socket/worker-socket';
 import { RegisterExitListeners } from './server-shutdown';
 
+const getServerListenConfig = () => {
+	const serverURL = process.env.SERVER_URL || 'http://localhost:9999';
+	if (!/^https?:\/\//i.test(serverURL)) {
+		throw new Error("SERVER_URL must include an 'http://' or 'https://' prefix.");
+	}
+
+	const url = new URL(serverURL);
+	const port = url.port
+		? Number.parseInt(url.port, 10)
+		: url.protocol == 'https:'
+		? 443
+		: 80;
+
+	return {
+		port,
+		serverAddress: url.toString().replace(/\/$/, ''),
+	};
+};
+
 export default async function ServerStartup() {
 	// Config---------------------------------------------------------------------------------------
 	await LoadConfig();
@@ -54,13 +73,10 @@ export default async function ServerStartup() {
 	RegisterExitListeners(socket);
 
 	// Start Server --------------------------------------------------------------------------------
-	const url = process.env.SERVER_URL || 'http://localhost';
-	const port = parseInt(process.env.SERVER_PORT || '9999');
+	const { port, serverAddress } = getServerListenConfig();
 
 	await new Promise<void>((resolve) => {
 		server.listen(port, () => {
-			const hasPrefix = url.match(/^https?:\/\//);
-			const serverAddress = `${hasPrefix ? url : 'http://' + url}:${port}`;
 			logger.info(`[server] Available at '${serverAddress}'.`);
 			resolve();
 		});

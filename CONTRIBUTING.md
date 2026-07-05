@@ -120,8 +120,7 @@ The remainder of dependencies should be handled internally by node/pnpm.
 
 You will also need to configure certain environment variables:
 
-- `SERVER_URL`: The address/ip where your server will be accessible.
-- `SERVER_PORT`: The port where your server will be accessible.
+- `SERVER_URL`: The full URL where your server will be accessible, including the scheme and any non-default port.
 - `CLIENT_PORT`: The port where your client will be accessible.
 - `DATA_PATH`: The path where persistent application data/configuration is stored.
 - `SERVER_ID`: The name/id of the development server.

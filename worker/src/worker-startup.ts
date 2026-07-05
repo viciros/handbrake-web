@@ -44,13 +44,22 @@ const isLocalOrPrivateHost = (hostname: string) => {
 	return false;
 };
 
-export const GetServerBaseAddress = (serverURL: string, serverPort: string) => {
-	const hasPrefix = /^https?:\/\//i.test(serverURL);
-	const url = new URL(`${hasPrefix ? serverURL : 'http://' + serverURL}:${serverPort}`);
+export const GetServerBaseAddress = (serverURL: string) => {
+	if (!/^https?:\/\//i.test(serverURL)) {
+		throw new Error("SERVER_URL must include an 'http://' or 'https://' prefix.");
+	}
 
-	if (url.protocol == 'http:' && !isLocalOrPrivateHost(url.hostname)) {
+	const url = new URL(serverURL);
+	const isPublicHost = !isLocalOrPrivateHost(url.hostname);
+
+	if (url.protocol == 'http:' && isPublicHost) {
 		throw new Error(
 			`Remote worker connections to '${url.hostname}' must use HTTPS. Set SERVER_URL with an https:// prefix for public hosts.`
+		);
+	}
+	if (url.protocol == 'https:' && isPublicHost && url.port == '80') {
+		throw new Error(
+			`Remote worker connections to '${url.hostname}' must not use port 80 with HTTPS.`
 		);
 	}
 
@@ -81,11 +90,10 @@ export default async function WorkerStartup() {
 
 	// Setup the server ------------------------------------------------------------
 	const serverURL = process.env.SERVER_URL;
-	const serverPort = process.env.SERVER_PORT;
 
-	const canConnect = serverURL != undefined && serverPort != undefined;
+	const canConnect = serverURL != undefined;
 	if (canConnect) {
-		serverBaseAddress = GetServerBaseAddress(serverURL, serverPort);
+		serverBaseAddress = GetServerBaseAddress(serverURL);
 		serverAddress = `${serverBaseAddress}/worker`;
 	}
 
@@ -105,7 +113,7 @@ export default async function WorkerStartup() {
 		logger.info('The worker process has started.');
 	} else {
 		logger.error(
-			'The SERVER_URL or SERVER_PORT environment variables are not set, no valid server to connect to.'
+			'The SERVER_URL environment variable is not set, no valid server to connect to.'
 		);
 	}
 }

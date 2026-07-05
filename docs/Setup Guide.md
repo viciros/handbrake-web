@@ -114,13 +114,12 @@ In your worker configuration, ensure the following environment variables are pro
 environment:
   - WORKER_ID=handbrake-worker
   - WORKER_TOKEN=copy-token-created-in-workers-page
-  - SERVER_URL=handbrake-server
-  - SERVER_PORT=9999
+  - SERVER_URL=http://handbrake-server:9999
 ```
 
 - `WORKER_ID` - This must be unique and not used by any other worker connected to your server.
 - `WORKER_TOKEN` - Create this on the Workers page in the server Web UI. The server stores only a hash and will not show the raw token again.
-- `SERVER_URL` & `SERVER_PORT` - If your worker is not on the same host device as your server, you will need to change these to reflect external access. Prefix with `https://` if using TLS/SSL.
+- `SERVER_URL` - The full URL workers use to reach the server. Include `http://` or `https://`; if no port is included, workers use port `80` for HTTP and `443` for HTTPS. Include the port in the URL, such as `http://handbrake-server:9999`, when the server uses a non-default port.
 
 Worker tokens authenticate workers to the server. HTTPS/TLS lets remote workers verify the server and keeps tokens and media streams encrypted over untrusted networks.
 

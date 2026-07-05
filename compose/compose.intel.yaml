@@ -26,8 +26,7 @@ services:
     environment:
       - WORKER_ID=handbrake-worker-intel # give your worker a unique name
       - WORKER_TOKEN=copy-token-created-in-workers-page # create this on the Workers page
-      - SERVER_URL=handbrake-server # change if setting up a standalone worker, prefix with http(s):// if necessary
-      - SERVER_PORT=9999 # change if using a reverse proxy or the port is otherwise different than above
+      - SERVER_URL=http://handbrake-server:9999 # change if setting up a standalone worker or reverse proxy
     volumes:
       - /mnt/cache/handbrake-web-worker-tmp:/tmp/handbrake-web # worker temp space for active transcodes
     depends_on:

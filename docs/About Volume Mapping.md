@@ -52,7 +52,7 @@ On the host, the output appears at `/mnt/user/encoded/complete/my-transcoded-vid
 
 The server can use local storage, SMB/NFS, or another mounted filesystem for input and output paths, as long as the server can reliably read inputs and write outputs. Input and output folders can be separate mounts, such as `/downloads` and `/encoded`, or they can be different directories under the same mount.
 
-Workers can run on the same host or another host without mounting the media share. For remote workers, configure `SERVER_URL` and `SERVER_PORT` so the worker can reach the server.
+Workers can run on the same host or another host without mounting the media share. For remote workers, configure `SERVER_URL` as the full server URL, including the scheme and any non-default port, so the worker can reach the server.
 
 Worker tokens authenticate workers to the server. Use HTTPS/TLS for workers that connect over an untrusted network so the worker can verify the server and the token/media stream stays encrypted.
 
