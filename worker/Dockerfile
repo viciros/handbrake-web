@@ -35,7 +35,6 @@ COPY --from=worker-build /handbrake-web/worker/build /handbrake-web/worker
 ENV HANDBRAKE_MODE=worker
 ENV HANDBRAKE_WEB_VERSION=${APP_VERSION}
 ENV DATA_PATH=/tmp/handbrake-web
-ENV VIDEO_PATH=/video
 
 # Start application
 WORKDIR /handbrake-web/worker

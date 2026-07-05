@@ -11,6 +11,7 @@ import styles from '../../styles.module.scss';
 
 export default function OutputSection() {
 	const { config } = useContext(PrimaryContext)!;
+	const configuredOutputPath = config.paths['output-path'] || config.paths['input-path'];
 	const {
 		jobFrom,
 		outputPath,
@@ -32,12 +33,8 @@ export default function OutputSection() {
 					<PathInput
 						id='output-path'
 						label='Directory: '
-						startPath={
-							config.paths['output-path']
-								? config.paths['output-path']
-								: config.paths['input-path']
-						}
-						rootPath={config.paths['media-path']}
+						startPath={configuredOutputPath}
+						rootPath={configuredOutputPath}
 						mode={FileBrowserMode.Directory}
 						allowCreate={true}
 						value={outputPath}

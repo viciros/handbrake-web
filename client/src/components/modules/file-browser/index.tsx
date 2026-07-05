@@ -48,6 +48,7 @@ export default function FileBrowser({
 		const request: DirectoryRequestType = {
 			path: path,
 			isRecursive: isRecursive,
+			rootPath: rootPath,
 		};
 		try {
 			const response: DirectoryType = await socket
@@ -107,6 +108,7 @@ export default function FileBrowser({
 		const request: CreateDirectoryRequestType = {
 			path: currentPath,
 			name: directoryName,
+			rootPath: rootPath,
 		};
 		try {
 			const result = await socket

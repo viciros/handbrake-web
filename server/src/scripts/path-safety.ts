@@ -2,13 +2,17 @@ import fs from 'fs/promises';
 import path from 'path';
 
 import { GetConfig } from './config/config';
-import { getVideoPath } from './data';
 
 const invalidPathSegmentRegex = /[<>:"|?*\u0000-\u001f]/g;
 
 const unique = (values: string[]) => [...new Set(values)];
 
 export const normalizePath = (value: string) => path.resolve(value);
+
+const isFilesystemRoot = (value: string) => {
+	const normalized = normalizePath(value);
+	return normalized == path.parse(normalized).root;
+};
 
 export function IsSubPath(parent: string, child: string) {
 	const relative = path.relative(normalizePath(parent), normalizePath(child));
@@ -17,36 +21,61 @@ export function IsSubPath(parent: string, child: string) {
 
 export function GetMediaRoots() {
 	const config = GetConfig();
-	const roots = [config.paths['media-path'] || getVideoPath()]
+	const roots = [
+		config.paths['input-path'],
+		config.paths['output-path'],
+		isFilesystemRoot(config.paths['media-path']) ? undefined : config.paths['media-path'],
+	]
 		.filter((value): value is string => typeof value == 'string' && value.length > 0)
 		.map(normalizePath);
 
 	return unique(roots);
 }
 
-async function GetRealMediaRoots() {
-	const roots = await Promise.all(GetMediaRoots().map((root) => fs.realpath(root)));
-	return unique(roots.map(normalizePath));
+async function GetRealRoots(roots: string[]) {
+	const realRoots = await Promise.all(
+		roots.map(async (root) => {
+			try {
+				return await fs.realpath(root);
+			} catch {
+				return undefined;
+			}
+		})
+	);
+
+	return unique(
+		realRoots
+			.filter((value): value is string => typeof value == 'string' && value.length > 0)
+			.map(normalizePath)
+	);
+}
+
+export function IsPathInRoots(value: string, roots: string[]) {
+	const resolvedPath = normalizePath(value);
+	return roots.map(normalizePath).some((root) => IsSubPath(root, resolvedPath));
 }
 
 export function IsPathInMediaRoots(value: string) {
-	const resolvedPath = normalizePath(value);
-	return GetMediaRoots().some((root) => IsSubPath(root, resolvedPath));
+	return IsPathInRoots(value, GetMediaRoots());
 }
 
-export function AssertPathInMediaRoots(value: string, label: string) {
+export function AssertPathInRoots(value: string, roots: string[], label: string) {
 	const resolvedPath = normalizePath(value);
 
-	if (!IsPathInMediaRoots(resolvedPath)) {
+	if (!IsPathInRoots(resolvedPath, roots)) {
 		throw new Error(`${label} '${value}' is outside the configured media roots.`);
 	}
 
 	return resolvedPath;
 }
 
-async function AssertRealPathInMediaRoots(value: string, label: string) {
+export function AssertPathInMediaRoots(value: string, label: string) {
+	return AssertPathInRoots(value, GetMediaRoots(), label);
+}
+
+async function AssertRealPathInRoots(value: string, roots: string[], label: string) {
 	const resolvedPath = normalizePath(value);
-	const realRoots = await GetRealMediaRoots();
+	const realRoots = await GetRealRoots(roots);
 
 	if (!realRoots.some((root) => IsSubPath(root, resolvedPath))) {
 		throw new Error(`${label} '${value}' is outside the configured media roots.`);
@@ -55,15 +84,19 @@ async function AssertRealPathInMediaRoots(value: string, label: string) {
 	return resolvedPath;
 }
 
-export async function AssertExistingPathInMediaRoots(value: string, label: string) {
-	const resolvedPath = AssertPathInMediaRoots(value, label);
+export async function AssertExistingPathInRoots(value: string, roots: string[], label: string) {
+	const resolvedPath = AssertPathInRoots(value, roots, label);
 	const realPath = await fs.realpath(resolvedPath);
 
-	return AssertRealPathInMediaRoots(realPath, label);
+	return AssertRealPathInRoots(realPath, roots, label);
 }
 
-export async function AssertExistingDirectoryInMediaRoots(value: string, label: string) {
-	const realPath = await AssertExistingPathInMediaRoots(value, label);
+export async function AssertExistingPathInMediaRoots(value: string, label: string) {
+	return AssertExistingPathInRoots(value, GetMediaRoots(), label);
+}
+
+export async function AssertExistingDirectoryInRoots(value: string, roots: string[], label: string) {
+	const realPath = await AssertExistingPathInRoots(value, roots, label);
 	const stats = await fs.stat(realPath);
 	if (!stats.isDirectory()) {
 		throw new Error(`${label} '${value}' is not a directory.`);
@@ -72,12 +105,24 @@ export async function AssertExistingDirectoryInMediaRoots(value: string, label: 
 	return realPath;
 }
 
-export async function AssertOutputPathInMediaRoots(value: string, label: string) {
-	const resolvedPath = AssertPathInMediaRoots(value, label);
+export async function AssertExistingDirectoryInMediaRoots(value: string, label: string) {
+	return AssertExistingDirectoryInRoots(value, GetMediaRoots(), label);
+}
+
+export async function AssertExistingDirectoryInRoot(value: string, root: string, label: string) {
+	return AssertExistingDirectoryInRoots(value, [root], label);
+}
+
+export async function AssertOutputPathInRoots(value: string, roots: string[], label: string) {
+	const resolvedPath = AssertPathInRoots(value, roots, label);
 	const parentPath = await fs.realpath(path.dirname(resolvedPath));
 
-	await AssertRealPathInMediaRoots(parentPath, `${label} parent`);
+	await AssertRealPathInRoots(parentPath, roots, `${label} parent`);
 	return resolvedPath;
+}
+
+export async function AssertOutputPathInMediaRoots(value: string, label: string) {
+	return AssertOutputPathInRoots(value, GetMediaRoots(), label);
 }
 
 export function AssertDirectoryNameSafe(value: string) {

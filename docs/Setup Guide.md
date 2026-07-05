@@ -85,7 +85,8 @@ Server:
 ```yaml
 volumes:
   - /path/to/your/data:/data
-  - /path/to/your/media:/video
+  - /path/to/your/downloads:/downloads
+  - /path/to/your/encoded:/encoded
 ```
 
 Worker:
@@ -95,7 +96,9 @@ volumes:
   - /mnt/cache/handbrake-web-worker-tmp:/tmp/handbrake-web
 ```
 
-HandBrake Web expects `/data` and `/video` to be mapped on the server. Workers no longer need access to the media share; the server streams source files to workers and receives finished outputs back. Workers use `/tmp/handbrake-web` as temp/data space while a job is active, so mapping it to host storage keeps large active transcodes out of Docker's writable container layer. Make sure the worker host path has enough free space for one input file plus one output file.
+HandBrake Web expects `/data` to be mapped on the server, plus whichever media folders you want the server to browse. You can mount those folders anywhere in the container, such as `/downloads` and `/encoded`, then choose them on the Settings page as the default input and output paths. With the example above, set `Default Input Path` to `/downloads` and `Default Output Path` to `/encoded`.
+
+Workers no longer need access to the media share; the server streams source files to workers and receives finished outputs back. Workers use `/tmp/handbrake-web` as temp/data space while a job is active, so mapping it to host storage keeps large active transcodes out of Docker's writable container layer. Make sure the worker host path has enough free space for one input file plus one output file.
 
 See [here](https://github.com/viciros/handbrake-web/wiki/about-volume-mapping) for more information.
 

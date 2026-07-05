@@ -17,6 +17,7 @@ interface Properties extends HTMLAttributes<HTMLDivElement> {
 
 export default function RegisterWatcher({ onClose }: Properties) {
 	const { config, presets, defaultPresets, socket } = useContext(PrimaryContext)!;
+	const configuredOutputPath = config.paths['output-path'] || config.paths['input-path'];
 
 	const [watchPath, setWatchPath] = useState('');
 	const [outputPath, setOutputPath] = useState('');
@@ -86,7 +87,7 @@ export default function RegisterWatcher({ onClose }: Properties) {
 						id='watcher-watch-path'
 						label='Directory to Watch:'
 						startPath={config.paths['input-path']}
-						rootPath={config.paths['media-path']}
+						rootPath={config.paths['input-path']}
 						mode={FileBrowserMode.Directory}
 						value={watchPath}
 						onConfirm={handleWatchPathConfirm}
@@ -94,8 +95,8 @@ export default function RegisterWatcher({ onClose }: Properties) {
 					<PathInput
 						id='watcher-output-path'
 						label='Output Directory:'
-						startPath={config.paths['output-path'] || config.paths['media-path']}
-						rootPath={config.paths['media-path']}
+						startPath={configuredOutputPath}
+						rootPath={configuredOutputPath}
 						mode={FileBrowserMode.Directory}
 						allowClear
 						allowCreate

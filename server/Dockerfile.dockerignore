@@ -8,7 +8,6 @@
 /data
 /images
 /temp
-/video
 /worker
 
 .env

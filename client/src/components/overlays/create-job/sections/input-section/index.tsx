@@ -21,7 +21,7 @@ export default function InputSection() {
 						id='input-path'
 						label={jobFrom == JobFrom.FromFile ? 'File: ' : 'Directory: '}
 						startPath={config.paths['input-path']}
-						rootPath={config.paths['media-path']}
+						rootPath={config.paths['input-path']}
 						mode={
 							jobFrom == JobFrom.FromFile
 								? FileBrowserMode.SingleFile

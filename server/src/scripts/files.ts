@@ -11,7 +11,9 @@ import path from 'path';
 import {
 	AssertDirectoryNameSafe,
 	AssertExistingDirectoryInMediaRoots,
+	AssertExistingDirectoryInRoots,
 	IsPathInMediaRoots,
+	IsPathInRoots,
 } from './path-safety';
 import { GetQueue } from './queue';
 
@@ -58,14 +60,24 @@ const GetDirectoryItemList = async (rootPath: string, recursive: boolean) => {
 	return items;
 };
 
-export async function GetDirectoryItems(absolutePath: string, recursive: boolean = false) {
+export async function GetDirectoryItems(
+	absolutePath: string,
+	recursive: boolean = false,
+	rootPath?: string
+) {
 	try {
-		const safePath = await AssertExistingDirectoryInMediaRoots(absolutePath, 'directory');
+		const roots = rootPath ? [rootPath] : undefined;
+		const safePath = roots
+			? await AssertExistingDirectoryInRoots(absolutePath, roots, 'directory')
+			: await AssertExistingDirectoryInMediaRoots(absolutePath, 'directory');
 
 		// Make parent item
 		const parentPath = path.resolve(safePath, '..');
+		const canNavigateToParent = roots
+			? IsPathInRoots(parentPath, roots)
+			: IsPathInMediaRoots(parentPath);
 		const parentItem: DirectoryItemType | undefined =
-			parentPath == safePath || !IsPathInMediaRoots(parentPath)
+			parentPath == safePath || !canNavigateToParent
 				? undefined
 				: {
 						path: parentPath,
@@ -97,12 +109,15 @@ export async function GetDirectoryItems(absolutePath: string, recursive: boolean
 	}
 }
 
-export async function MakeDirectory(directoryPath: string, directoryName: string) {
+export async function MakeDirectory(
+	directoryPath: string,
+	directoryName: string,
+	rootPath?: string
+) {
 	try {
-		const safeDirectoryPath = await AssertExistingDirectoryInMediaRoots(
-			directoryPath,
-			'directory'
-		);
+		const safeDirectoryPath = rootPath
+			? await AssertExistingDirectoryInRoots(directoryPath, [rootPath], 'directory')
+			: await AssertExistingDirectoryInMediaRoots(directoryPath, 'directory');
 		const safeDirectoryName = AssertDirectoryNameSafe(directoryName);
 
 		// Check if the program has write permissions in the parent dir

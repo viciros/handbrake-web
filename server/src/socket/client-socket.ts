@@ -152,7 +152,11 @@ export default function ClientSocket(io: Server) {
 				callback: (directory: DirectoryType | null) => void
 			) => {
 				try {
-					const items = await GetDirectoryItems(request.path, request.isRecursive);
+					const items = await GetDirectoryItems(
+						request.path,
+						request.isRecursive,
+						request.rootPath
+					);
 					callback(items ?? null);
 				} catch (err) {
 					logClientSocketError(
@@ -169,7 +173,7 @@ export default function ClientSocket(io: Server) {
 			'make-directory',
 			async (item: CreateDirectoryRequestType, callback: (result: boolean) => void) => {
 				try {
-					const result = await MakeDirectory(item.path, item.name);
+					const result = await MakeDirectory(item.path, item.name, item.rootPath);
 					callback(result);
 				} catch (err) {
 					logClientSocketError(

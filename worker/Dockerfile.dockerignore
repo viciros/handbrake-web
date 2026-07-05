@@ -10,7 +10,6 @@
 /images
 /server
 /temp
-/video
 
 .env
 .gitignore

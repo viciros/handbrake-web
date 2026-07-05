@@ -124,7 +124,6 @@ You will also need to configure certain environment variables:
 - `SERVER_PORT`: The port where your server will be accessible.
 - `CLIENT_PORT`: The port where your client will be accessible.
 - `DATA_PATH`: The path where persistent application data/configuration is stored.
-- `VIDEO_PATH`: The path where media files will be stored.
 - `SERVER_ID`: The name/id of the development server.
 - `WORKER_ID`: The name/id of the development worker.
 

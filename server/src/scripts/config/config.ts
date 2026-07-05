@@ -7,7 +7,7 @@ import fs from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import logger from 'logging';
 import path from 'path';
-import { getDataPath, getVideoPath } from 'scripts/data';
+import { getDataPath } from 'scripts/data';
 import { parse, stringify } from 'yaml';
 import { EmitToAllClients } from '../connections';
 import { RunMigrations } from './utilities/migrator';
@@ -18,8 +18,8 @@ const defaultConfig: ConfigType = {
 		version: 2,
 	},
 	paths: {
-		'media-path': getVideoPath(),
-		'input-path': getVideoPath(),
+		'media-path': '/',
+		'input-path': '/',
 		'output-path': '',
 	},
 	presets: {
@@ -46,28 +46,17 @@ const isQueueStartupBehavior = (value: unknown): value is QueueStartupBehavior =
 		.filter((entry) => typeof entry == 'number')
 		.includes(value);
 
-const normalizeConfigPath = (value: string) => path.resolve(value);
-
-const isSubPath = (parent: string, child: string) => {
-	const relative = path.relative(normalizeConfigPath(parent), normalizeConfigPath(child));
-	return relative == '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-};
-
-const validatePathWithinRoot = (
-	parent: string,
-	child: string,
-	childLabel: string,
-	parentLabel: string,
-	allowEmpty = false
-) => {
-	if (allowEmpty && child.length == 0) return;
-
-	if (!isSubPath(parent, child)) {
-		throw new Error(`${childLabel} must be inside ${parentLabel}.`);
+const validateConfigPath = (value: string, label: string, allowEmpty = false) => {
+	if (allowEmpty && value.length == 0) return;
+	if (value.length == 0) {
+		throw new Error(`${label} must not be empty.`);
+	}
+	if (!path.isAbsolute(value)) {
+		throw new Error(`${label} must be an absolute path.`);
 	}
 };
 
-function ValidateConfig(value: UnknownConfigType): ConfigType {
+export function ValidateConfig(value: UnknownConfigType): ConfigType {
 	if (!isRecord(value.config) || typeof value.config.version != 'number') {
 		throw new Error("Config section 'config.version' must be a number.");
 	}
@@ -79,25 +68,9 @@ function ValidateConfig(value: UnknownConfigType): ConfigType {
 	) {
 		throw new Error("Config section 'paths' is invalid.");
 	}
-	validatePathWithinRoot(
-		getVideoPath(),
-		value.paths['media-path'],
-		"Config path 'media-path'",
-		'VIDEO_PATH'
-	);
-	validatePathWithinRoot(
-		value.paths['media-path'],
-		value.paths['input-path'],
-		"Config path 'input-path'",
-		"Config path 'media-path'"
-	);
-	validatePathWithinRoot(
-		value.paths['media-path'],
-		value.paths['output-path'],
-		"Config path 'output-path'",
-		"Config path 'media-path'",
-		true
-	);
+	validateConfigPath(value.paths['media-path'], "Config path 'media-path'");
+	validateConfigPath(value.paths['input-path'], "Config path 'input-path'");
+	validateConfigPath(value.paths['output-path'], "Config path 'output-path'", true);
 	if (
 		!isRecord(value.presets) ||
 		typeof value.presets['show-default-presets'] != 'boolean' ||

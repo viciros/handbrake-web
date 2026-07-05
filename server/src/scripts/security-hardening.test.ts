@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import test, { before } from 'node:test';
+import { QueueStartupBehavior } from '@handbrake-web/shared/types/config';
 
 let testRoot = '';
 let videoPath = '';
@@ -21,7 +22,6 @@ before(async () => {
 	await mkdir(videoPath, { recursive: true });
 
 	process.env.DATA_PATH = dataPath;
-	process.env.VIDEO_PATH = videoPath;
 });
 
 test('rejects placeholder admin credentials', async () => {
@@ -62,6 +62,33 @@ test('validates worker IDs', async () => {
 	assert.equal(IsValidWorkerID('worker 01'), false);
 	assert.equal(IsValidWorkerID('../worker'), false);
 	assert.equal(IsValidWorkerID('x'.repeat(65)), false);
+});
+
+test('accepts independent configured input and output paths', async () => {
+	const { ValidateConfig } = await import('./config/config');
+	const inputPath = path.join(testRoot, 'downloads');
+	const outputPath = path.join(testRoot, 'encoded');
+
+	assert.doesNotThrow(() =>
+		ValidateConfig({
+			config: {
+				version: 2,
+			},
+			paths: {
+				'media-path': '/',
+				'input-path': inputPath,
+				'output-path': outputPath,
+			},
+			presets: {
+				'show-default-presets': true,
+				'allow-preset-creator': false,
+			},
+			application: {
+				'queue-startup-behavior': QueueStartupBehavior.Previous,
+				'update-check-interval': 12,
+			},
+		})
+	);
 });
 
 test('validates output upload Content-Length against 2x the input size', async () => {
@@ -105,8 +132,8 @@ test('stops output streams larger than the input size', async () => {
 	);
 });
 
-test('rejects media-root symlink escapes', async (t) => {
-	const { AssertExistingDirectoryInMediaRoots } = await import('./path-safety');
+test('rejects browser-root symlink escapes', async (t) => {
+	const { AssertExistingDirectoryInRoot } = await import('./path-safety');
 	const outsidePath = path.join(testRoot, 'outside');
 	const linkPath = path.join(videoPath, 'outside-link');
 	await mkdir(outsidePath, { recursive: true });
@@ -119,7 +146,7 @@ test('rejects media-root symlink escapes', async (t) => {
 	}
 
 	await assert.rejects(
-		AssertExistingDirectoryInMediaRoots(linkPath, 'directory'),
+		AssertExistingDirectoryInRoot(linkPath, videoPath, 'directory'),
 		/outside the configured media roots/
 	);
 });

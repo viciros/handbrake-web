@@ -16,9 +16,11 @@ export type DirectoryType = {
 export type DirectoryRequestType = {
 	path: string;
 	isRecursive: boolean;
+	rootPath?: string;
 };
 
 export type CreateDirectoryRequestType = {
 	path: string;
 	name: string;
+	rootPath?: string;
 };

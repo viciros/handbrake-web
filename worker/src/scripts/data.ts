@@ -1,34 +1,33 @@
 import type { CreateConsoleLogger } from '@handbrake-web/shared/logger';
-import { access, mkdir } from 'fs/promises';
-import path from 'path';
-import { cwd } from 'process';
+import { mkdir, stat } from 'fs/promises';
 
 export const getDataPath = () => process.env.DATA_PATH || '/tmp/handbrake-web';
-export const getVideoPath = () => process.env.VIDEO_PATH || path.resolve(cwd(), '../video');
 
 export async function InitializeDataPath(logger: ReturnType<typeof CreateConsoleLogger>) {
+	const dataPath = getDataPath();
+
 	try {
-		await access(getDataPath());
-		if (getDataPath().match(/^\/tmp/)) {
-			logger.info(
-				`The data directory '${getDataPath()}' is a child of '/tmp', but it already exists for some reason?`
-			);
-		} else {
-			logger.info(
-				`The data directory '${getDataPath()}' is not a child of '/tmp' and already exists.`
-			);
+		const dataPathStats = await stat(dataPath);
+		if (!dataPathStats.isDirectory()) {
+			throw new Error(`The data path '${dataPath}' exists, but it is not a directory.`);
 		}
+
+		logger.info(`Using existing data directory '${dataPath}'.`);
 	} catch (err) {
-		if (getDataPath().match(/^\/tmp/)) {
-			try {
-				logger.info(`Creating the data path at '${getDataPath()}'.`);
-				await mkdir(getDataPath());
-			} catch (err) {
-				logger.error(`[error] Could not create the data path at '${getDataPath()}'.`);
-				throw err;
-			}
-		} else {
-			logger.error(`[error] The data path '${getDataPath()}' does not exist.`);
+		const code =
+			err && typeof err == 'object' && 'code' in err
+				? (err as { code?: string }).code
+				: undefined;
+		if (code != 'ENOENT') {
+			logger.error(`[error] The data path '${dataPath}' is not usable.`);
+			throw err;
+		}
+
+		try {
+			logger.info(`Creating the data directory at '${dataPath}'.`);
+			await mkdir(dataPath, { recursive: true });
+		} catch (err) {
+			logger.error(`[error] Could not create the data directory at '${dataPath}'.`);
 			throw err;
 		}
 	}
