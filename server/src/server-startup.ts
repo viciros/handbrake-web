@@ -6,7 +6,12 @@ import { Server as SocketServer } from 'socket.io';
 
 import logger from 'logging';
 import ClientRoutes from 'routes/client';
-import { corsOptions, RegisterWorkerAuthRoutes, ValidateAuthConfig } from 'scripts/auth';
+import {
+	corsOptions,
+	InitializeClientAuth,
+	RegisterWorkerAuthRoutes,
+	ValidateAuthConfig,
+} from 'scripts/auth';
 import { LoadConfig } from 'scripts/config/config';
 import { DatabaseConnect } from 'scripts/database/database';
 import { LoadDefaultPresets, LoadPresets } from 'scripts/presets';
@@ -31,6 +36,7 @@ export default async function ServerStartup() {
 
 	// Database ------------------------------------------------------------------------------------
 	await DatabaseConnect();
+	await InitializeClientAuth();
 	await InitializeQueue();
 	await InitializeWatchers();
 

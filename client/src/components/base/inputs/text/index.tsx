@@ -17,8 +17,8 @@ export default function TextInput({ label, className, id, ...properties }: Prope
 			<input
 				className={styles['input']}
 				id={`text-input ${id || ''}`}
-				type='text'
 				size={1}
+				type='text'
 				{...properties}
 			/>
 		</div>

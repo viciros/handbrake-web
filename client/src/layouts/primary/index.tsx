@@ -1,3 +1,4 @@
+import { ClientAuthStatusType } from '@handbrake-web/shared/types/auth';
 import { ConfigType } from '@handbrake-web/shared/types/config';
 import { DetailedWatcherType } from '@handbrake-web/shared/types/database';
 import { HandbrakePresetCategoryType } from '@handbrake-web/shared/types/preset';
@@ -7,6 +8,7 @@ import { WorkerPropertiesMap } from '@handbrake-web/shared/types/worker';
 import { Outlet } from '@tanstack/react-router';
 import { Fragment, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
+import UpdateClientCredentials from '~components/overlays/update-client-credentials';
 import SideBar from '~components/root/side-bar';
 import NoConnection from '~pages/_default/no-connection';
 import { PrimaryContext } from './context';
@@ -23,6 +25,7 @@ export default function PrimaryLayout() {
 
 	const [socket] = useState(() => io(server, { autoConnect: false, withCredentials: true }));
 	const [isConnected, setIsConnected] = useState(false);
+	const [authStatus, setAuthStatus] = useState<ClientAuthStatusType>();
 	const [config, setConfig] = useState<ConfigType>();
 	const [queue, setQueue] = useState<QueueType>([]);
 	const [queueStatus, setQueueStatus] = useState<QueueStatus>(QueueStatus.Idle);
@@ -76,6 +79,11 @@ export default function PrimaryLayout() {
 	}, [server, socket]);
 
 	// Server event listeners --------------------------------------------------
+	const onAuthStatusUpdate = (status: ClientAuthStatusType) => {
+		console.log(`[client] Auth status has been updated.`);
+		setAuthStatus(status);
+	};
+
 	const onConfigUpdate = (config: ConfigType) => {
 		console.log(`[client] The config has been updated.`);
 		setConfig(config);
@@ -121,6 +129,7 @@ export default function PrimaryLayout() {
 	};
 
 	useEffect(() => {
+		socket.on('auth-status-update', onAuthStatusUpdate);
 		socket.on('config-update', onConfigUpdate);
 		socket.on('queue-update', onQueueUpdate);
 		socket.on('queue-status-update', onQueueStatusUpdate);
@@ -131,6 +140,7 @@ export default function PrimaryLayout() {
 		socket.on('watchers-update', onWatchersUpdate);
 
 		return () => {
+			socket.off('auth-status-update', onAuthStatusUpdate);
 			socket.off('config-update', onConfigUpdate);
 			socket.off('queue-update', onQueueUpdate);
 			socket.off('queue-status-update', onQueueStatusUpdate);
@@ -150,11 +160,12 @@ export default function PrimaryLayout() {
 				socket={socket}
 				config={config}
 			/>
-			{isConnected && config != undefined ? (
+			{isConnected && config != undefined && authStatus != undefined ? (
 				<PrimaryContext
 					value={{
 						serverURL,
 						socket,
+						authStatus,
 						queue,
 						queueStatus,
 						presets,
@@ -166,6 +177,7 @@ export default function PrimaryLayout() {
 					}}
 				>
 					<Outlet />
+					{authStatus.must_change_credentials && <UpdateClientCredentials />}
 				</PrimaryContext>
 			) : (
 				<NoConnection url={serverURL} />

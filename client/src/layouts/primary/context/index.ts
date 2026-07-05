@@ -1,4 +1,5 @@
 import { ConfigType } from '@handbrake-web/shared/types/config';
+import { ClientAuthStatusType } from '@handbrake-web/shared/types/auth';
 import { DetailedJobType, DetailedWatcherType } from '@handbrake-web/shared/types/database';
 import { HandbrakePresetCategoryType } from '@handbrake-web/shared/types/preset';
 import { QueueStatus } from '@handbrake-web/shared/types/queue';
@@ -10,6 +11,7 @@ import { Socket } from 'socket.io-client';
 export interface PrimaryOutletContextType {
 	serverURL: string;
 	socket: Socket;
+	authStatus: ClientAuthStatusType;
 	queue: DetailedJobType[];
 	queueStatus: QueueStatus;
 	presets: HandbrakePresetCategoryType;

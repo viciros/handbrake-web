@@ -108,17 +108,16 @@ In your server configuration, ensure the following environment variables are pro
 
 ```yaml
 environment:
-  - HANDBRAKE_WEB_USERNAME=admin
-  - HANDBRAKE_WEB_PASSWORD=change-this-password
   - local_private_key=copy-generated-server-private-key
   - remote_public_key=copy-generated-worker-public-key
 ```
 
-- `HANDBRAKE_WEB_USERNAME` & `HANDBRAKE_WEB_PASSWORD` - These credentials are required to access the web interface.
 - `local_private_key` - The server private key.
 - `remote_public_key` - The worker public key trusted by the server.
 
 If `local_private_key` or `remote_public_key` is missing on server startup, the server logs a generated server keypair and worker keypair, then exits. Copy the generated values into your compose file and restart.
+
+On the first successful server start, HandBrake Web logs a generated web UI password for the default username `admin`. Sign in with those credentials, then change the username and password when prompted. The password is stored only as a salted hash in the server database.
 
 In your worker configuration, ensure the following environment variables are properly configured:
 

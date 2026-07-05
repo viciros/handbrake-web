@@ -8,11 +8,22 @@ import {
 	VerifyWorkerAuthPayload,
 	type WorkerAuthChallenge,
 } from '@handbrake-web/shared/scripts/worker-auth';
+import type {
+	ClientAuthStatusType,
+	UpdateClientCredentialsResultType,
+	UpdateClientCredentialsType,
+} from '@handbrake-web/shared/types/auth';
+import type { ClientAuthType } from '@handbrake-web/shared/types/database';
 import type { Express, NextFunction, Request, Response } from 'express';
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
 import type { ExtendedError, Socket } from 'socket.io';
 
 import logger from 'logging';
+import {
+	DatabaseGetClientAuth,
+	DatabaseInsertClientAuth,
+	DatabaseUpdateClientAuth,
+} from 'scripts/database/database-auth';
 
 type Credentials = {
 	username: string;
@@ -21,30 +32,46 @@ type Credentials = {
 
 type ClientAuthSession = {
 	username: string;
+	credentialsUpdatedAt: number;
 	expiresAt: number;
 	nonce: string;
 };
 
-const userAuthEnv = {
-	username: 'HANDBRAKE_WEB_USERNAME',
-	password: 'HANDBRAKE_WEB_PASSWORD',
-};
 const workerAuthEnv = {
 	localPrivateKey: 'local_private_key',
 	remotePublicKey: 'remote_public_key',
 };
+const defaultClientAuthUsername = 'admin';
 const clientAuthSessionCookieName = 'handbrake-web-client-auth';
 const clientAuthSessionLifetimeMs = 12 * 60 * 60 * 1000;
 const clientAuthSessionSecret = randomBytes(32);
 const workerChallengeLifetimeMs = 60_000;
 const maxPendingWorkerAuthChallenges = 1000;
 const workerIDRegex = /^[A-Za-z0-9._-]{1,64}$/;
+const usernameMaxLength = 64;
+const passwordMinLength = 12;
+const passwordMaxLength = 1024;
+
+const scryptCost = 16_384;
+const scryptBlockSize = 8;
+const scryptParallelization = 1;
+const scryptKeyLength = 64;
 
 const workerAuthChallenges = new Map<string, WorkerAuthChallenge>();
+let clientAuthCredentials: ClientAuthType | undefined;
 
 type RateLimitRecord = {
 	count: number;
 	expiresAt: number;
+};
+
+type ParsedPasswordHash = {
+	cost: number;
+	blockSize: number;
+	parallelization: number;
+	keyLength: number;
+	salt: string;
+	hash: string;
 };
 
 const createRateLimiter = (maxAttempts: number, windowMs: number) => {
@@ -93,15 +120,6 @@ const workerChallengeAttempts = createRateLimiter(120, 60 * 1000);
 const getRequestRateLimitKey = (req: Request) => req.socket.remoteAddress || req.ip || 'unknown';
 const getSocketRateLimitKey = (socket: Socket) =>
 	socket.handshake.address || socket.conn.remoteAddress || 'unknown';
-
-const getServerCredentials = (): Credentials | undefined => {
-	const username = process.env[userAuthEnv.username];
-	const password = process.env[userAuthEnv.password];
-
-	if (!username || !password) return undefined;
-
-	return { username, password };
-};
 
 const getWorkerAuthKeys = () => {
 	const localPrivateKey = process.env[workerAuthEnv.localPrivateKey];
@@ -156,27 +174,175 @@ const parseCookieHeader = (header: string | undefined) => {
 	return cookies;
 };
 
-const authenticateUser = (credentials: Credentials | undefined) => {
-	const expected = getServerCredentials();
+const getLoadedClientAuthCredentials = () => clientAuthCredentials;
+
+const requireLoadedClientAuthCredentials = () => {
+	const credentials = getLoadedClientAuthCredentials();
+	if (!credentials) {
+		throw new Error('Client auth credentials have not been initialized.');
+	}
+
+	return credentials;
+};
+
+const toClientAuthStatus = (credentials = requireLoadedClientAuthCredentials()) => ({
+	username: credentials.username,
+	must_change_credentials: Boolean(credentials.must_change_credentials),
+});
+
+const deriveScryptKey = (
+	password: string,
+	salt: string,
+	keyLength: number,
+	cost: number,
+	blockSize: number,
+	parallelization: number
+) =>
+	new Promise<Buffer>((resolve, reject) => {
+		scrypt(
+			password,
+			salt,
+			keyLength,
+			{ N: cost, r: blockSize, p: parallelization },
+			(err, derivedKey) => {
+				if (err) {
+					reject(err);
+					return;
+				}
+
+				resolve(derivedKey);
+			}
+		);
+	});
+
+const parsePasswordHash = (storedHash: string): ParsedPasswordHash | undefined => {
+	const parts = storedHash.split('$');
+	if (parts.length != 7) return undefined;
+
+	const [algorithm, cost, blockSize, parallelization, keyLength, salt, hash] = parts;
+	if (algorithm != 'scrypt' || !salt || !hash) return undefined;
+
+	const numericParts = [cost, blockSize, parallelization, keyLength].map((value) =>
+		Number(value)
+	);
+	if (
+		numericParts.some(
+			(value) => !Number.isSafeInteger(value) || value <= 0 || value > 1_000_000
+		)
+	) {
+		return undefined;
+	}
+
+	return {
+		cost: numericParts[0],
+		blockSize: numericParts[1],
+		parallelization: numericParts[2],
+		keyLength: numericParts[3],
+		salt,
+		hash,
+	};
+};
+
+export async function HashClientPassword(password: string) {
+	const salt = randomBytes(16).toString('base64url');
+	const hash = await deriveScryptKey(
+		password,
+		salt,
+		scryptKeyLength,
+		scryptCost,
+		scryptBlockSize,
+		scryptParallelization
+	);
+
+	return [
+		'scrypt',
+		scryptCost,
+		scryptBlockSize,
+		scryptParallelization,
+		scryptKeyLength,
+		salt,
+		hash.toString('base64url'),
+	].join('$');
+}
+
+export async function VerifyClientPasswordHash(password: string, storedHash: string) {
+	const parsedHash = parsePasswordHash(storedHash);
+	if (!parsedHash) return false;
+
+	const expectedHash = Buffer.from(parsedHash.hash, 'base64url');
+	const candidateHash = await deriveScryptKey(
+		password,
+		parsedHash.salt,
+		parsedHash.keyLength,
+		parsedHash.cost,
+		parsedHash.blockSize,
+		parsedHash.parallelization
+	);
+
+	return (
+		expectedHash.length == candidateHash.length && timingSafeEqual(expectedHash, candidateHash)
+	);
+}
+
+const generateClientAuthPassword = () => randomBytes(24).toString('base64url');
+
+const logGeneratedClientAuthCredentials = (password: string) => {
+	logger.warn('[auth] Created initial web UI credentials.');
+	logger.warn(`[auth] Username: ${defaultClientAuthUsername}`);
+	logger.warn(`[auth] Password: ${password}`);
+	logger.warn('[auth] Change the username and password in the web UI after signing in.');
+};
+
+const validateNewClientCredentials = (
+	username: string,
+	password: string,
+	currentCredentials = requireLoadedClientAuthCredentials()
+) => {
+	if (!username) return 'Username is required.';
+	if (username.length > usernameMaxLength) {
+		return `Username must be ${usernameMaxLength} characters or fewer.`;
+	}
+	if (username.includes(':')) return 'Username cannot contain a colon.';
+	if (/[\u0000-\u001f\u007f]/.test(username)) {
+		return 'Username cannot contain control characters.';
+	}
+	if (password.length < passwordMinLength) {
+		return `Password must be at least ${passwordMinLength} characters.`;
+	}
+	if (password.length > passwordMaxLength) {
+		return `Password must be ${passwordMaxLength} characters or fewer.`;
+	}
+	if (password == username || password == 'change-this-password') {
+		return 'Password must not match a placeholder value.';
+	}
+	if (
+		currentCredentials.must_change_credentials &&
+		safeEqual(username, currentCredentials.username)
+	) {
+		return 'Choose a new username.';
+	}
+};
+
+const authenticateUser = async (credentials: Credentials | undefined) => {
+	const expected = getLoadedClientAuthCredentials();
 	if (!expected || !credentials) return false;
 
 	return (
 		safeEqual(credentials.username, expected.username) &&
-		safeEqual(credentials.password, expected.password)
+		(await VerifyClientPasswordHash(credentials.password, expected.password_hash))
 	);
 };
-
-const isPlaceholderCredentials = (credentials: Credentials) =>
-	credentials.password == 'change-this-password' ||
-	credentials.password == credentials.username ||
-	(credentials.username == 'admin' && credentials.password == 'admin');
 
 const signClientAuthSessionPayload = (payload: string) =>
 	createHmac('sha256', clientAuthSessionSecret).update(payload).digest('base64url');
 
-export function CreateClientAuthSessionToken(username: string) {
+export function CreateClientAuthSessionToken(
+	username: string,
+	credentialsUpdatedAt = requireLoadedClientAuthCredentials().updated_at
+) {
 	const session: ClientAuthSession = {
 		username,
+		credentialsUpdatedAt,
 		expiresAt: Date.now() + clientAuthSessionLifetimeMs,
 		nonce: randomBytes(16).toString('base64url'),
 	};
@@ -186,8 +352,11 @@ export function CreateClientAuthSessionToken(username: string) {
 	return `${payload}.${signature}`;
 }
 
-export function IsClientAuthSessionTokenValid(token: string | undefined) {
-	if (!token) return false;
+export function IsClientAuthSessionTokenValid(
+	token: string | undefined,
+	expectedCredentials = getLoadedClientAuthCredentials()
+) {
+	if (!token || !expectedCredentials) return false;
 
 	const parts = token.split('.');
 	if (parts.length != 2 || !parts[0] || !parts[1]) return false;
@@ -200,11 +369,10 @@ export function IsClientAuthSessionTokenValid(token: string | undefined) {
 		const session = JSON.parse(
 			Buffer.from(payload, 'base64url').toString('utf-8')
 		) as Partial<ClientAuthSession>;
-		const expectedCredentials = getServerCredentials();
 
 		return (
-			!!expectedCredentials &&
 			session.username == expectedCredentials.username &&
+			session.credentialsUpdatedAt == expectedCredentials.updated_at &&
 			typeof session.expiresAt == 'number' &&
 			Number.isSafeInteger(session.expiresAt) &&
 			session.expiresAt > Date.now() &&
@@ -236,32 +404,89 @@ const setClientAuthSessionCookie = (req: Request, res: Response, credentials: Cr
 	});
 };
 
+export function GetClientAuthStatus(): ClientAuthStatusType {
+	return toClientAuthStatus();
+}
+
+export async function InitializeClientAuth() {
+	const existingCredentials = await DatabaseGetClientAuth();
+	if (existingCredentials) {
+		clientAuthCredentials = existingCredentials;
+		return { status: GetClientAuthStatus() };
+	}
+
+	const now = Date.now();
+	const generatedPassword = generateClientAuthPassword();
+	const credentials = await DatabaseInsertClientAuth({
+		username: defaultClientAuthUsername,
+		password_hash: await HashClientPassword(generatedPassword),
+		must_change_credentials: true,
+		created_at: now,
+		updated_at: now,
+	});
+	if (!credentials) {
+		throw new Error('Could not create client auth credentials.');
+	}
+
+	clientAuthCredentials = credentials;
+	logGeneratedClientAuthCredentials(generatedPassword);
+
+	return { generatedPassword, status: GetClientAuthStatus() };
+}
+
+export async function UpdateClientAuthCredentials(
+	data: UpdateClientCredentialsType
+): Promise<UpdateClientCredentialsResultType> {
+	const currentCredentials = requireLoadedClientAuthCredentials();
+	const currentPassword = String(data.current_password ?? '');
+	const username = String(data.username ?? '').trim();
+	const newPassword = String(data.new_password ?? '');
+
+	if (
+		!(await VerifyClientPasswordHash(currentPassword, currentCredentials.password_hash))
+	) {
+		return { ok: false, message: 'Current password is incorrect.' };
+	}
+
+	const validationError = validateNewClientCredentials(
+		username,
+		newPassword,
+		currentCredentials
+	);
+	if (validationError) {
+		return { ok: false, message: validationError };
+	}
+
+	const now = Date.now();
+	const updatedCredentials = await DatabaseUpdateClientAuth({
+		username,
+		password_hash: await HashClientPassword(newPassword),
+		must_change_credentials: false,
+		updated_at: now,
+	});
+	if (!updatedCredentials) {
+		return { ok: false, message: 'Could not update credentials.' };
+	}
+
+	clientAuthCredentials = updatedCredentials;
+
+	return {
+		ok: true,
+		message: 'Credentials updated.',
+		status: GetClientAuthStatus(),
+		requires_reauth: true,
+	};
+}
+
 export function IsValidWorkerID(workerID: string) {
 	return workerIDRegex.test(workerID);
 }
 
 export function ValidateAuthConfig() {
-	const credentials = getServerCredentials();
 	const workerKeys = getWorkerAuthKeys();
 	if (!workerKeys) {
 		LogGeneratedWorkerAuthKeys();
-		if (!credentials) {
-			logger.error(
-				`[auth] Missing ${userAuthEnv.username}/${userAuthEnv.password}; server user auth is required.`
-			);
-		}
 		process.exit(1);
-	}
-
-	if (!credentials) {
-		throw new Error(
-			`Missing ${userAuthEnv.username}/${userAuthEnv.password}; server user auth is required.`
-		);
-	}
-	if (isPlaceholderCredentials(credentials)) {
-		throw new Error(
-			`${userAuthEnv.username}/${userAuthEnv.password} must not use placeholder or matching values.`
-		);
 	}
 
 	CreatePrivateKeyFromRawPrivateKey(workerKeys.localPrivateKey);
@@ -344,7 +569,7 @@ export function RegisterWorkerAuthRoutes(app: Express) {
 	});
 }
 
-export function RequireHttpAuth(req: Request, res: Response, next: NextFunction) {
+export async function RequireHttpAuth(req: Request, res: Response, next: NextFunction) {
 	const rateLimitKey = getRequestRateLimitKey(req);
 	if (httpAuthFailures.isLimited(rateLimitKey)) {
 		res.status(429).send('Too many authentication attempts.');
@@ -358,7 +583,7 @@ export function RequireHttpAuth(req: Request, res: Response, next: NextFunction)
 	}
 
 	const credentials = parseBasicAuth(req.header('authorization'));
-	if (credentials && authenticateUser(credentials)) {
+	if (credentials && (await authenticateUser(credentials))) {
 		httpAuthFailures.reset(rateLimitKey);
 		setClientAuthSessionCookie(req, res, credentials);
 		next();
@@ -371,32 +596,38 @@ export function RequireHttpAuth(req: Request, res: Response, next: NextFunction)
 }
 
 export function AuthenticateClientSocket(socket: Socket, next: (err?: ExtendedError) => void) {
-	const rateLimitKey = getSocketRateLimitKey(socket);
-	if (clientSocketAuthFailures.isLimited(rateLimitKey)) {
-		logger.warn(`[socket] Rate limited unauthenticated client connection '${socket.id}'.`);
-		next(new Error('rate limited'));
-		return;
-	}
+	void (async () => {
+		const rateLimitKey = getSocketRateLimitKey(socket);
+		if (clientSocketAuthFailures.isLimited(rateLimitKey)) {
+			logger.warn(`[socket] Rate limited unauthenticated client connection '${socket.id}'.`);
+			next(new Error('rate limited'));
+			return;
+		}
 
-	const auth = socket.handshake.auth as Partial<Credentials> | undefined;
+		const auth = socket.handshake.auth as Partial<Credentials> | undefined;
+		const isAuthenticated =
+			IsClientAuthSessionTokenValid(
+				getClientAuthSessionCookie(socket.request.headers.cookie)
+			) ||
+			(await authenticateUser({
+				username: String(auth?.username ?? ''),
+				password: String(auth?.password ?? ''),
+			}));
 
-	if (
-		IsClientAuthSessionTokenValid(
-			getClientAuthSessionCookie(socket.request.headers.cookie)
-		) ||
-		authenticateUser({
-			username: String(auth?.username ?? ''),
-			password: String(auth?.password ?? ''),
-		})
-	) {
-		clientSocketAuthFailures.reset(rateLimitKey);
-		next();
-		return;
-	}
+		if (isAuthenticated) {
+			clientSocketAuthFailures.reset(rateLimitKey);
+			next();
+			return;
+		}
 
-	clientSocketAuthFailures.recordFailure(rateLimitKey);
-	logger.warn(`[socket] Rejected unauthenticated client connection '${socket.id}'.`);
-	next(new Error('unauthorized'));
+		clientSocketAuthFailures.recordFailure(rateLimitKey);
+		logger.warn(`[socket] Rejected unauthenticated client connection '${socket.id}'.`);
+		next(new Error('unauthorized'));
+	})().catch((err) => {
+		logger.error(`[socket] [error] Could not authenticate client '${socket.id}'.`);
+		logger.error(err);
+		next(new Error('unauthorized'));
+	});
 }
 
 export function AuthenticateWorkerSocket(socket: Socket, next: (err?: ExtendedError) => void) {

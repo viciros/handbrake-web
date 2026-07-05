@@ -24,7 +24,7 @@ before(async () => {
 	process.env.DATA_PATH = dataPath;
 });
 
-test('rejects placeholder admin credentials', async () => {
+test('validates worker auth keypair config', async () => {
 	const { GenerateWorkerAuthKeyPair } = await import(
 		'@handbrake-web/shared/scripts/worker-auth'
 	);
@@ -32,27 +32,67 @@ test('rejects placeholder admin credentials', async () => {
 	const serverKeys = GenerateWorkerAuthKeyPair();
 	const workerKeys = GenerateWorkerAuthKeyPair();
 
-	process.env.HANDBRAKE_WEB_USERNAME = 'admin';
-	process.env.HANDBRAKE_WEB_PASSWORD = 'change-this-password';
 	process.env.local_private_key = serverKeys.privateKey;
 	process.env.remote_public_key = workerKeys.publicKey;
 
-	assert.throws(() => ValidateAuthConfig(), /placeholder/);
+	assert.doesNotThrow(() => ValidateAuthConfig());
+});
+
+test('hashes client auth passwords', async () => {
+	const { HashClientPassword, VerifyClientPasswordHash } = await import('./auth');
+	const password = 'correct horse battery staple';
+	const hash = await HashClientPassword(password);
+
+	assert.notEqual(hash, password);
+	assert.equal(hash.includes(password), false);
+	assert.equal(await VerifyClientPasswordHash(password, hash), true);
+	assert.equal(await VerifyClientPasswordHash('wrong password', hash), false);
+});
+
+test('initializes generated client auth credentials', async () => {
+	const { DatabaseConnect } = await import('./database/database');
+	const { DatabaseGetClientAuth } = await import('./database/database-auth');
+	const { InitializeClientAuth, VerifyClientPasswordHash } = await import('./auth');
+
+	await DatabaseConnect();
+	const result = await InitializeClientAuth();
+	const storedCredentials = await DatabaseGetClientAuth();
+
+	assert.equal(result.status.username, 'admin');
+	assert.equal(result.status.must_change_credentials, true);
+	assert.ok(result.generatedPassword);
+	assert.ok(storedCredentials);
+	assert.equal(storedCredentials.password_hash.includes(result.generatedPassword), false);
+	assert.equal(
+		await VerifyClientPasswordHash(result.generatedPassword, storedCredentials.password_hash),
+		true
+	);
 });
 
 test('validates signed client auth session tokens', async () => {
 	const { CreateClientAuthSessionToken, IsClientAuthSessionTokenValid } = await import('./auth');
 
-	process.env.HANDBRAKE_WEB_USERNAME = 'web-user';
-	process.env.HANDBRAKE_WEB_PASSWORD = 'web-password';
+	const currentCredentials = {
+		id: 'client',
+		username: 'web-user',
+		password_hash: 'hash',
+		must_change_credentials: false,
+		created_at: 1,
+		updated_at: 123,
+	};
 
-	const token = CreateClientAuthSessionToken('web-user');
+	const token = CreateClientAuthSessionToken('web-user', currentCredentials.updated_at);
 	const tamperedToken = `${token.slice(0, -1)}x`;
-	const wrongUserToken = CreateClientAuthSessionToken('other-user');
+	const wrongUserToken = CreateClientAuthSessionToken(
+		'other-user',
+		currentCredentials.updated_at
+	);
+	const oldCredentialsToken = CreateClientAuthSessionToken('web-user', 122);
 
-	assert.equal(IsClientAuthSessionTokenValid(token), true);
-	assert.equal(IsClientAuthSessionTokenValid(tamperedToken), false);
-	assert.equal(IsClientAuthSessionTokenValid(wrongUserToken), false);
+	assert.equal(IsClientAuthSessionTokenValid(token, currentCredentials), true);
+	assert.equal(IsClientAuthSessionTokenValid(tamperedToken, currentCredentials), false);
+	assert.equal(IsClientAuthSessionTokenValid(wrongUserToken, currentCredentials), false);
+	assert.equal(IsClientAuthSessionTokenValid(oldCredentialsToken, currentCredentials), false);
 });
 
 test('validates worker IDs', async () => {

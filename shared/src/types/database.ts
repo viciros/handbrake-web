@@ -4,6 +4,7 @@ import type { TranscodeStage } from './transcode';
 export interface Database {
 	migrations: MigrationsTable;
 	migrations_lock: MigrationsLockTable;
+	client_auth: ClientAuthTable;
 	status: StatusTable;
 	jobs: JobsTable;
 	jobs_status: JobsStatusTable;
@@ -22,6 +23,20 @@ export interface MigrationsLockTable {
 	id: string;
 	is_locked: number;
 }
+
+// Client Auth Table ------------------------------------------------------------------------------
+export interface ClientAuthTable {
+	id: string;
+	username: string;
+	password_hash: string;
+	must_change_credentials: boolean;
+	created_at: number;
+	updated_at: number;
+}
+
+export type ClientAuthType = Selectable<ClientAuthTable>;
+export type AddClientAuthType = Insertable<ClientAuthTable>;
+export type UpdateClientAuthType = Updateable<ClientAuthTable>;
 
 // Status Table ------------------------------------------------------------------------------------
 export interface StatusTable {

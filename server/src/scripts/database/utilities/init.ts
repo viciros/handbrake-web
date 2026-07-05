@@ -31,6 +31,21 @@ export async function InitializeDatabaseTables() {
 			.addColumn('is_locked', 'integer', (col) => col.defaultTo(0).notNull())
 			.execute();
 
+		// Create the client_auth table -----------------------------------------------------------
+		await database.schema
+			.createTable('client_auth')
+			.ifNotExists()
+			.addColumn('id', 'text', (col) => col.notNull().primaryKey())
+			.addColumn('username', 'text', (col) => col.notNull())
+			.addColumn('password_hash', 'text', (col) => col.notNull())
+			.addColumn('must_change_credentials', 'boolean', (col) =>
+				col.notNull().defaultTo(true)
+			)
+			.addColumn('created_at', 'integer', (col) => col.notNull())
+			.addColumn('updated_at', 'integer', (col) => col.notNull())
+			.execute();
+		logger.info(`[server] [database] Initialized the 'client_auth' table.`);
+
 		// Create the status table -----------------------------------------------------------------
 		await database.schema
 			.createTable('status')

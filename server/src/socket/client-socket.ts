@@ -6,6 +6,10 @@ import type {
 	DetailedWatcherType,
 	UpdateWatcherRuleType,
 } from '@handbrake-web/shared/types/database';
+import type {
+	UpdateClientCredentialsResultType,
+	UpdateClientCredentialsType,
+} from '@handbrake-web/shared/types/auth';
 import {
 	type CreateDirectoryRequestType,
 	type DirectoryItemsType,
@@ -15,7 +19,11 @@ import {
 import { type HandbrakePresetType } from '@handbrake-web/shared/types/preset';
 import { type GithubReleaseResponseType } from '@handbrake-web/shared/types/version';
 import logger from 'logging';
-import { AuthenticateClientSocket } from 'scripts/auth';
+import {
+	AuthenticateClientSocket,
+	GetClientAuthStatus,
+	UpdateClientAuthCredentials,
+} from 'scripts/auth';
 import { GetConfig, WriteConfig } from 'scripts/config/config';
 import { AddClient, RemoveClient } from 'scripts/connections';
 import {
@@ -55,6 +63,7 @@ import {
 import { Socket as Client, Server } from 'socket.io';
 
 const initClient = async (socket: Client) => {
+	socket.emit('auth-status-update', GetClientAuthStatus());
 	socket.emit('config-update', GetConfig());
 	socket.emit('queue-update', await GetQueue());
 	socket.emit('presets-update', GetPresets());
@@ -89,6 +98,29 @@ export default function ClientSocket(io: Server) {
 		socket.on('config-update', async (config: ConfigType) => {
 			await WriteConfig(config);
 		});
+
+		// Auth ------------------------------------------------------------------------------------
+		socket.on(
+			'update-client-credentials',
+			async (
+				data: UpdateClientCredentialsType,
+				callback?: (result: UpdateClientCredentialsResultType) => void
+			) => {
+				try {
+					const result = await UpdateClientAuthCredentials(data);
+					callback?.(result);
+					if (result.ok && result.status) {
+						socket.emit('auth-status-update', result.status);
+					}
+				} catch (err) {
+					logClientSocketError(socket.id, 'could not update client credentials', err);
+					callback?.({
+						ok: false,
+						message: 'Could not update credentials.',
+					});
+				}
+			}
+		);
 
 		// Queue -----------------------------------------------------------------------------------
 		socket.on('start-queue', async () => {

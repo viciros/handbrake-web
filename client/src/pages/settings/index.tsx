@@ -6,6 +6,7 @@ import Section from '~components/root/section';
 import { PrimaryContext } from '~layouts/primary/context';
 import { SettingsContext } from './context';
 import SettingsApplication from './sections/application-section';
+import SettingsCredentials from './sections/credentials-section';
 import SettingsPaths from './sections/paths-section';
 import SettingsPreset from './sections/presets-section';
 import styles from './styles.module.scss';
@@ -52,6 +53,7 @@ export default function SettingsPage() {
 					<SettingsPaths />
 					<SettingsPreset />
 					<SettingsApplication />
+					<SettingsCredentials />
 				</div>
 			</SettingsContext>
 		</Page>
