@@ -38,8 +38,9 @@
 			gap: 2rem;
 
 			.job-section {
-				flex: 1 1 10rem;
+				flex: 0 1 auto;
 				min-width: 0;
+				max-width: 100%;
 
 				.job-section-label {
 					margin: 0;
@@ -78,6 +79,19 @@
 				flex-flow: row wrap;
 				gap: 1rem;
 				min-width: 0;
+
+				#input,
+				#output {
+					flex: 1 1 18rem;
+					min-width: min(18rem, 100%);
+
+					.job-section-children {
+						overflow: visible;
+						overflow-wrap: anywhere;
+						text-overflow: clip;
+						white-space: normal;
+					}
+				}
 
 				#current-fps,
 				#average-fps {
