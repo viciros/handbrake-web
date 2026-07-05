@@ -104,38 +104,25 @@ See [here](https://github.com/viciros/handbrake-web/wiki/about-volume-mapping) f
 
 #### `environment` Variables
 
-In your server configuration, ensure the following environment variables are properly configured:
-
-```yaml
-environment:
-  - local_private_key=copy-generated-server-private-key
-  - remote_public_key=copy-generated-worker-public-key
-```
-
-- `local_private_key` - The server private key.
-- `remote_public_key` - The worker public key trusted by the server.
-
-If `local_private_key` or `remote_public_key` is missing on server startup, the server logs a generated server keypair and worker keypair, then exits. Copy the generated values into your compose file and restart.
-
 On the first successful server start, HandBrake Web logs a generated web UI password for the default username `admin`. Sign in with those credentials, then change the password when prompted. You can also change the username. The password is stored only as a salted hash in the server database.
+
+After signing in, create a worker token on the Workers page. The token is shown once. Copy it into the worker's `WORKER_TOKEN` environment variable before starting that worker.
 
 In your worker configuration, ensure the following environment variables are properly configured:
 
 ```yaml
 environment:
   - WORKER_ID=handbrake-worker
+  - WORKER_TOKEN=copy-token-created-in-workers-page
   - SERVER_URL=handbrake-server
   - SERVER_PORT=9999
-  - local_private_key=copy-generated-worker-private-key
-  - remote_public_key=copy-generated-server-public-key
 ```
 
 - `WORKER_ID` - This must be unique and not used by any other worker connected to your server.
+- `WORKER_TOKEN` - Create this on the Workers page in the server Web UI. The server stores only a hash and will not show the raw token again.
 - `SERVER_URL` & `SERVER_PORT` - If your worker is not on the same host device as your server, you will need to change these to reflect external access. Prefix with `https://` if using TLS/SSL.
-- `local_private_key` - The worker private key.
-- `remote_public_key` - The server public key trusted by the worker.
 
-Keypair authentication verifies that the worker and server trust each other. It does not encrypt media streams by itself, so remote workers should connect through HTTPS/TLS.
+Worker tokens authenticate workers to the server. HTTPS/TLS lets remote workers verify the server and keeps tokens and media streams encrypted over untrusted networks.
 
 ### Step 3 - Start Containers
 

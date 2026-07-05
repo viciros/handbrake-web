@@ -22,20 +22,15 @@ before(async () => {
 	await mkdir(videoPath, { recursive: true });
 
 	process.env.DATA_PATH = dataPath;
+
+	const { DatabaseConnect } = await import('./database/database');
+	await DatabaseConnect();
 });
 
-test('validates worker auth keypair config', async () => {
-	const { GenerateWorkerAuthKeyPair } = await import(
-		'@handbrake-web/shared/scripts/worker-auth'
-	);
-	const { ValidateAuthConfig } = await import('./auth');
-	const serverKeys = GenerateWorkerAuthKeyPair();
-	const workerKeys = GenerateWorkerAuthKeyPair();
+test('does not require worker auth env config', async () => {
+	const auth = await import('./auth');
 
-	process.env.local_private_key = serverKeys.privateKey;
-	process.env.remote_public_key = workerKeys.publicKey;
-
-	assert.doesNotThrow(() => ValidateAuthConfig());
+	assert.equal('ValidateAuthConfig' in auth, false);
 });
 
 test('hashes client auth passwords', async () => {
@@ -50,12 +45,10 @@ test('hashes client auth passwords', async () => {
 });
 
 test('initializes generated client auth credentials', async () => {
-	const { DatabaseConnect } = await import('./database/database');
 	const { DatabaseGetClientAuth } = await import('./database/database-auth');
 	const { InitializeClientAuth, UpdateClientAuthCredentials, VerifyClientPasswordHash } =
 		await import('./auth');
 
-	await DatabaseConnect();
 	const result = await InitializeClientAuth();
 	const storedCredentials = await DatabaseGetClientAuth();
 
@@ -113,6 +106,42 @@ test('validates worker IDs', async () => {
 	assert.equal(IsValidWorkerID('worker 01'), false);
 	assert.equal(IsValidWorkerID('../worker'), false);
 	assert.equal(IsValidWorkerID('x'.repeat(65)), false);
+});
+
+test('creates, verifies, rotates, and revokes worker tokens', async () => {
+	const {
+		CreateWorkerAuthToken,
+		RevokeWorkerAuthToken,
+		RotateWorkerAuthToken,
+		VerifySecretHash,
+	} = await import('./auth');
+	const { DatabaseGetWorkerAuthToken } = await import('./database/database-worker-auth');
+	const workerID = 'worker-token-test';
+
+	const created = await CreateWorkerAuthToken(workerID);
+	assert.equal(created.ok, true);
+	assert.ok(created.token);
+
+	const storedCreatedToken = await DatabaseGetWorkerAuthToken(workerID);
+	assert.ok(storedCreatedToken);
+	assert.notEqual(storedCreatedToken.token_hash, created.token);
+	assert.equal(storedCreatedToken.token_hash.includes(created.token), false);
+	assert.equal(await VerifySecretHash(created.token, storedCreatedToken.token_hash), true);
+	assert.equal(await VerifySecretHash('wrong token', storedCreatedToken.token_hash), false);
+
+	const rotated = await RotateWorkerAuthToken(workerID);
+	assert.equal(rotated.ok, true);
+	assert.ok(rotated.token);
+	assert.notEqual(rotated.token, created.token);
+
+	const storedRotatedToken = await DatabaseGetWorkerAuthToken(workerID);
+	assert.ok(storedRotatedToken);
+	assert.equal(await VerifySecretHash(rotated.token, storedRotatedToken.token_hash), true);
+	assert.equal(storedRotatedToken.last_used_at, null);
+
+	const revoked = await RevokeWorkerAuthToken(workerID);
+	assert.equal(revoked.ok, true);
+	assert.equal(await DatabaseGetWorkerAuthToken(workerID), undefined);
 });
 
 test('accepts independent configured input and output paths', async () => {

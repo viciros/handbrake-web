@@ -46,6 +46,18 @@ export async function InitializeDatabaseTables() {
 			.execute();
 		logger.info(`[server] [database] Initialized the 'client_auth' table.`);
 
+		// Create the worker_auth_tokens table ----------------------------------------------------
+		await database.schema
+			.createTable('worker_auth_tokens')
+			.ifNotExists()
+			.addColumn('worker_id', 'text', (col) => col.notNull().primaryKey())
+			.addColumn('token_hash', 'text', (col) => col.notNull())
+			.addColumn('created_at', 'integer', (col) => col.notNull())
+			.addColumn('updated_at', 'integer', (col) => col.notNull())
+			.addColumn('last_used_at', 'integer')
+			.execute();
+		logger.info(`[server] [database] Initialized the 'worker_auth_tokens' table.`);
+
 		// Create the status table -----------------------------------------------------------------
 		await database.schema
 			.createTable('status')

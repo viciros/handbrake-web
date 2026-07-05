@@ -9,6 +9,8 @@ import type {
 import type {
 	UpdateClientCredentialsResultType,
 	UpdateClientCredentialsType,
+	WorkerAuthTokenActionResultType,
+	WorkerAuthTokenSecretResultType,
 } from '@handbrake-web/shared/types/auth';
 import {
 	type CreateDirectoryRequestType,
@@ -21,7 +23,11 @@ import { type GithubReleaseResponseType } from '@handbrake-web/shared/types/vers
 import logger from 'logging';
 import {
 	AuthenticateClientSocket,
+	CreateWorkerAuthToken,
 	GetClientAuthStatus,
+	GetWorkerAuthTokenRecords,
+	RevokeWorkerAuthToken,
+	RotateWorkerAuthToken,
 	UpdateClientAuthCredentials,
 } from 'scripts/auth';
 import { GetConfig, WriteConfig } from 'scripts/config/config';
@@ -70,6 +76,7 @@ const initClient = async (socket: Client) => {
 	socket.emit('default-presets-update', GetDefaultPresets());
 	socket.emit('queue-status-update', await GetQueueStatus());
 	socket.emit('properties-update', GetWorkerProperties());
+	socket.emit('worker-auth-tokens-update', await GetWorkerAuthTokenRecords());
 	socket.emit('watchers-update', await DatabaseGetDetailedWatchers());
 };
 
@@ -88,6 +95,10 @@ export default function ClientSocket(io: Server) {
 		initClient(socket).catch((err) => {
 			logClientSocketError(socket.id, 'could not be initialized', err);
 		});
+
+		const emitWorkerAuthTokensUpdate = async () => {
+			namespace.emit('worker-auth-tokens-update', await GetWorkerAuthTokenRecords());
+		};
 
 		socket.on('disconnect', () => {
 			logger.info(`[socket] Client '${socket.id}' has disconnected.`);
@@ -117,6 +128,66 @@ export default function ClientSocket(io: Server) {
 					callback?.({
 						ok: false,
 						message: 'Could not update credentials.',
+					});
+				}
+			}
+		);
+
+		socket.on(
+			'create-worker-auth-token',
+			async (
+				workerID: string,
+				callback?: (result: WorkerAuthTokenSecretResultType) => void
+			) => {
+				try {
+					const result = await CreateWorkerAuthToken(workerID);
+					callback?.(result);
+					if (result.ok) await emitWorkerAuthTokensUpdate();
+				} catch (err) {
+					logClientSocketError(socket.id, 'could not create worker auth token', err);
+					callback?.({
+						ok: false,
+						message: 'Could not create worker token.',
+					});
+				}
+			}
+		);
+
+		socket.on(
+			'rotate-worker-auth-token',
+			async (
+				workerID: string,
+				callback?: (result: WorkerAuthTokenSecretResultType) => void
+			) => {
+				try {
+					const result = await RotateWorkerAuthToken(workerID);
+					callback?.(result);
+					if (result.ok) await emitWorkerAuthTokensUpdate();
+				} catch (err) {
+					logClientSocketError(socket.id, 'could not rotate worker auth token', err);
+					callback?.({
+						ok: false,
+						message: 'Could not rotate worker token.',
+					});
+				}
+			}
+		);
+
+		socket.on(
+			'revoke-worker-auth-token',
+			async (
+				workerID: string,
+				callback?: (result: WorkerAuthTokenActionResultType) => void
+			) => {
+				try {
+					const result = await RevokeWorkerAuthToken(workerID);
+					callback?.(result);
+					if (result.ok) await emitWorkerAuthTokensUpdate();
+				} catch (err) {
+					logClientSocketError(socket.id, 'could not revoke worker auth token', err);
+					callback?.({
+						ok: false,
+						message: 'Could not revoke worker token.',
 					});
 				}
 			}

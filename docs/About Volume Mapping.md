@@ -26,7 +26,7 @@ When you create a job in HandBrake Web:
 
 - The server browses and validates files under the configured input/output paths.
 - The server stores the job's input and output paths in its database.
-- A worker authenticates to the server with keypair challenge auth.
+- A worker authenticates to the server with its Web UI-generated worker token.
 - The server creates a one-use input transfer token for the assigned worker.
 - The worker downloads the source file to local temporary storage.
 - The worker runs HandBrakeCLI against local temporary paths.
@@ -54,7 +54,7 @@ The server can use local storage, SMB/NFS, or another mounted filesystem for inp
 
 Workers can run on the same host or another host without mounting the media share. For remote workers, configure `SERVER_URL` and `SERVER_PORT` so the worker can reach the server.
 
-Keypair authentication verifies that workers and the server trust each other, but it does not encrypt the media stream by itself. Use HTTPS/TLS for workers that connect over an untrusted network.
+Worker tokens authenticate workers to the server. Use HTTPS/TLS for workers that connect over an untrusted network so the worker can verify the server and the token/media stream stays encrypted.
 
 ## What Still Needs Care
 

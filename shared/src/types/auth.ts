@@ -15,3 +15,22 @@ export type UpdateClientCredentialsResultType = {
 	status?: ClientAuthStatusType;
 	requires_reauth?: boolean;
 };
+
+export type WorkerAuthTokenRecordType = {
+	worker_id: string;
+	created_at: number;
+	updated_at: number;
+	last_used_at: number | null;
+};
+
+export type WorkerAuthTokenSecretResultType = {
+	ok: boolean;
+	message?: string;
+	record?: WorkerAuthTokenRecordType;
+	token?: string;
+};
+
+export type WorkerAuthTokenActionResultType = {
+	ok: boolean;
+	message?: string;
+};

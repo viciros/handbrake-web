@@ -6,12 +6,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import logger from 'logging';
 import ClientRoutes from 'routes/client';
-import {
-	corsOptions,
-	InitializeClientAuth,
-	RegisterWorkerAuthRoutes,
-	ValidateAuthConfig,
-} from 'scripts/auth';
+import { corsOptions, InitializeClientAuth } from 'scripts/auth';
 import { LoadConfig } from 'scripts/config/config';
 import { DatabaseConnect } from 'scripts/database/database';
 import { LoadDefaultPresets, LoadPresets } from 'scripts/presets';
@@ -24,9 +19,6 @@ import WorkerSocket from 'socket/worker-socket';
 import { RegisterExitListeners } from './server-shutdown';
 
 export default async function ServerStartup() {
-	// Auth -----------------------------------------------------------------------------------------
-	ValidateAuthConfig();
-
 	// Config---------------------------------------------------------------------------------------
 	await LoadConfig();
 
@@ -51,7 +43,6 @@ export default async function ServerStartup() {
 	app.use(cors(corsOptions));
 
 	// Routes ------------------------------------------------------------------------------
-	RegisterWorkerAuthRoutes(app);
 	RegisterWorkerTransferRoutes(app);
 	ClientRoutes(app);
 

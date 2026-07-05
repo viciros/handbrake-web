@@ -1,0 +1,135 @@
+@use '~styles/variables/breakpoints';
+
+.token-section {
+	.create-token {
+		display: flex;
+		flex-flow: column nowrap;
+		align-items: stretch;
+		gap: 0.75rem;
+	}
+
+	.message {
+		color: var(--text-tertiary);
+	}
+
+	.tokens {
+		display: flex;
+		flex-flow: column nowrap;
+	}
+
+	.empty {
+		padding: 0.75rem 0;
+		color: var(--text-tertiary);
+	}
+
+	.token-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 1rem;
+		padding: 1rem 0;
+		border-top: 0.1rem solid var(--transparent-primary);
+
+		&:last-child {
+			border-bottom: 0.1rem solid var(--transparent-primary);
+		}
+	}
+
+	.identity {
+		display: flex;
+		flex-flow: row wrap;
+		align-items: center;
+		gap: 0.5rem 0.75rem;
+		min-width: 0;
+	}
+
+	.worker-id {
+		font-weight: 700;
+		overflow-wrap: anywhere;
+	}
+
+	.status {
+		padding: 0.25rem 0.5rem;
+		border-radius: 0.5rem;
+		background-color: var(--background-four);
+		color: var(--text-tertiary);
+
+		&[data-online='true'] {
+			color: var(--handbrake-green);
+		}
+	}
+
+	.dates {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.75rem;
+
+		div {
+			display: flex;
+			flex-flow: column nowrap;
+			gap: 0.25rem;
+			min-width: 0;
+		}
+
+		span {
+			color: var(--text-tertiary);
+			font-size: 0.875rem;
+		}
+
+		strong {
+			font-size: 0.95rem;
+			font-weight: 500;
+			overflow-wrap: anywhere;
+		}
+	}
+
+	.actions,
+	.overlay-actions {
+		display: flex;
+		flex-flow: row wrap;
+		gap: 0.75rem;
+	}
+
+	.token-window {
+		display: flex;
+		flex-flow: column nowrap;
+		gap: 1rem;
+	}
+
+	.secret-worker {
+		color: var(--text-tertiary);
+		font-weight: 700;
+		overflow-wrap: anywhere;
+	}
+
+	.secret-token {
+		display: block;
+		padding: 0.75rem;
+		border-radius: 0.5rem;
+		background-color: var(--background-four);
+		overflow-wrap: anywhere;
+	}
+
+	.overlay-message {
+		color: var(--text-tertiary);
+	}
+
+	@media (min-width: breakpoints.$breakpoint-medium) {
+		.create-token {
+			flex-flow: row wrap;
+			align-items: flex-end;
+		}
+
+		.token-row {
+			grid-template-columns: minmax(12rem, 1fr) minmax(18rem, 2fr) auto;
+			align-items: center;
+		}
+
+		.dates {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+
+		.actions {
+			justify-content: flex-end;
+		}
+	}
+}

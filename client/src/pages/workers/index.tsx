@@ -5,6 +5,7 @@ import Page from '~components/root/page';
 import { PrimaryContext } from '~layouts/primary/context';
 import StatusSection from './sections/status-section';
 import SummarySection from './sections/summary-section';
+import TokenSection from './sections/token-section';
 import styles from './styles.module.scss';
 
 export type WorkerInfo = {
@@ -17,7 +18,7 @@ export type WorkerInfo = {
 export type WorkerInfoMap = Record<string, WorkerInfo>;
 
 export default function WorkersPage() {
-	const { connections, queue, properties } = useContext(PrimaryContext)!;
+	const { connections, queue, properties, socket, workerTokens } = useContext(PrimaryContext)!;
 
 	const workerInfo: WorkerInfoMap = Object.fromEntries(
 		connections.workers.map((worker) => {
@@ -43,6 +44,11 @@ export default function WorkersPage() {
 	return (
 		<Page className={styles['workers-page']} heading='Workers'>
 			<SummarySection workerInfo={workerInfo} queue={queue} />
+			<TokenSection
+				connectedWorkerIDs={connections.workers.map((worker) => worker.workerID)}
+				socket={socket}
+				workerTokens={workerTokens}
+			/>
 			<StatusSection workerInfo={workerInfo} />
 		</Page>
 	);

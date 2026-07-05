@@ -1,5 +1,8 @@
 import { ConfigType } from '@handbrake-web/shared/types/config';
-import { ClientAuthStatusType } from '@handbrake-web/shared/types/auth';
+import {
+	ClientAuthStatusType,
+	WorkerAuthTokenRecordType,
+} from '@handbrake-web/shared/types/auth';
 import { DetailedJobType, DetailedWatcherType } from '@handbrake-web/shared/types/database';
 import { HandbrakePresetCategoryType } from '@handbrake-web/shared/types/preset';
 import { QueueStatus } from '@handbrake-web/shared/types/queue';
@@ -18,6 +21,7 @@ export interface PrimaryOutletContextType {
 	defaultPresets: HandbrakePresetCategoryType;
 	connections: ConnectionIDsType;
 	properties: WorkerPropertiesMap;
+	workerTokens: WorkerAuthTokenRecordType[];
 	config: ConfigType;
 	watchers: DetailedWatcherType[];
 }

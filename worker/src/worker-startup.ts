@@ -1,12 +1,3 @@
-import {
-	CreatePrivateKeyFromRawPrivateKey,
-	CreatePublicKeyFromRawPublicKey,
-	GetServerChallengePayload,
-	GetWorkerChallengePayload,
-	SignWorkerAuthPayload,
-	VerifyWorkerAuthPayload,
-	type WorkerAuthChallenge,
-} from '@handbrake-web/shared/scripts/worker-auth';
 import 'dotenv/config';
 import logger from 'logging';
 import { isIP } from 'node:net';
@@ -66,62 +57,24 @@ export const GetServerBaseAddress = (serverURL: string, serverPort: string) => {
 	return url.toString().replace(/\/$/, '');
 };
 
-const getWorkerSocketAuth = async (workerID: string) => {
-	const localPrivateKey = process.env.local_private_key;
-	const remotePublicKey = process.env.remote_public_key;
-	if (!localPrivateKey || !remotePublicKey) {
-		throw new Error("Missing 'local_private_key'/'remote_public_key' environment variables.");
-	}
-
-	const challengeURL = new URL('/worker/auth/challenge', serverBaseAddress);
-	challengeURL.searchParams.set('workerID', workerID);
-
-	const response = await fetch(challengeURL);
-	if (!response.ok) {
-		throw new Error(`Could not get worker auth challenge: ${response.statusText}`);
-	}
-
-	const challenge = (await response.json()) as WorkerAuthChallenge;
-	if (
-		!VerifyWorkerAuthPayload(
-			GetServerChallengePayload(challenge),
-			challenge.serverSignature,
-			remotePublicKey
-		)
-	) {
-		throw new Error('The server auth challenge signature is invalid.');
-	}
-
-	return {
-		challengeID: challenge.challengeID,
-		workerSignature: SignWorkerAuthPayload(
-			GetWorkerChallengePayload(challenge),
-			localPrivateKey
-		),
-	};
-};
-
 export default async function WorkerStartup() {
 	// Setup -------------------------------------------------------------------------------------------
 
 	// Get worker ID from env variable, exit process if it is not set --------------
 	const workerID = process.env.WORKER_ID;
-	const localPrivateKey = process.env.local_private_key;
-	const remotePublicKey = process.env.remote_public_key;
+	const workerToken = process.env.WORKER_TOKEN;
 	if (!workerID) {
 		logger.error(
 			"No 'WORKER_ID' envrionment variable is set - this worker will not be set up. Please set this via your docker-compose environment section."
 		);
 		process.exit(0);
 	}
-	if (!localPrivateKey || !remotePublicKey) {
+	if (!workerToken) {
 		logger.error(
-			"No 'local_private_key'/'remote_public_key' environment variables are set - this worker cannot authenticate to the server."
+			"No 'WORKER_TOKEN' environment variable is set - this worker cannot authenticate to the server. Create a worker token in the server Web UI."
 		);
 		process.exit(0);
 	}
-	CreatePrivateKeyFromRawPrivateKey(localPrivateKey);
-	CreatePublicKeyFromRawPublicKey(remotePublicKey);
 
 	// Init worker properties
 	await GetWorkerProperties();
@@ -138,17 +91,7 @@ export default async function WorkerStartup() {
 
 	const server = io(serverAddress, {
 		autoConnect: false,
-		auth: (callback) => {
-			void (async () => {
-				try {
-					callback(await getWorkerSocketAuth(workerID));
-				} catch (err) {
-					logger.error(`[auth] [error] Could not prepare worker socket auth.`);
-					logger.error(err);
-					callback({});
-				}
-			})();
-		},
+		auth: { token: workerToken },
 		query: { workerID: workerID },
 	});
 

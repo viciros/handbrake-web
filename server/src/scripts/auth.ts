@@ -1,29 +1,30 @@
-import {
-	CreatePrivateKeyFromRawPrivateKey,
-	CreatePublicKeyFromRawPublicKey,
-	GenerateWorkerAuthKeyPair,
-	GetServerChallengePayload,
-	GetWorkerChallengePayload,
-	SignWorkerAuthPayload,
-	VerifyWorkerAuthPayload,
-	type WorkerAuthChallenge,
-} from '@handbrake-web/shared/scripts/worker-auth';
 import type {
 	ClientAuthStatusType,
 	UpdateClientCredentialsResultType,
 	UpdateClientCredentialsType,
+	WorkerAuthTokenActionResultType,
+	WorkerAuthTokenRecordType,
+	WorkerAuthTokenSecretResultType,
 } from '@handbrake-web/shared/types/auth';
-import type { ClientAuthType } from '@handbrake-web/shared/types/database';
-import type { Express, NextFunction, Request, Response } from 'express';
-import { createHmac, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
+import type { ClientAuthType, WorkerAuthTokenType } from '@handbrake-web/shared/types/database';
+import type { NextFunction, Request, Response } from 'express';
+import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { ExtendedError, Socket } from 'socket.io';
 
 import logger from 'logging';
+import { EmitToAllClients, GetWorkerWithID } from 'scripts/connections';
 import {
 	DatabaseGetClientAuth,
 	DatabaseInsertClientAuth,
 	DatabaseUpdateClientAuth,
 } from 'scripts/database/database-auth';
+import {
+	DatabaseDeleteWorkerAuthToken,
+	DatabaseGetWorkerAuthToken,
+	DatabaseGetWorkerAuthTokens,
+	DatabaseInsertWorkerAuthToken,
+	DatabaseUpdateWorkerAuthToken,
+} from 'scripts/database/database-worker-auth';
 
 type Credentials = {
 	username: string;
@@ -37,16 +38,10 @@ type ClientAuthSession = {
 	nonce: string;
 };
 
-const workerAuthEnv = {
-	localPrivateKey: 'local_private_key',
-	remotePublicKey: 'remote_public_key',
-};
 const defaultClientAuthUsername = 'admin';
 const clientAuthSessionCookieName = 'handbrake-web-client-auth';
 const clientAuthSessionLifetimeMs = 12 * 60 * 60 * 1000;
 const clientAuthSessionSecret = randomBytes(32);
-const workerChallengeLifetimeMs = 60_000;
-const maxPendingWorkerAuthChallenges = 1000;
 const workerIDRegex = /^[A-Za-z0-9._-]{1,64}$/;
 const usernameMaxLength = 64;
 const passwordMinLength = 12;
@@ -57,7 +52,6 @@ const scryptBlockSize = 8;
 const scryptParallelization = 1;
 const scryptKeyLength = 64;
 
-const workerAuthChallenges = new Map<string, WorkerAuthChallenge>();
 let clientAuthCredentials: ClientAuthType | undefined;
 
 type RateLimitRecord = {
@@ -115,20 +109,11 @@ const createRateLimiter = (maxAttempts: number, windowMs: number) => {
 
 const httpAuthFailures = createRateLimiter(30, 5 * 60 * 1000);
 const clientSocketAuthFailures = createRateLimiter(20, 5 * 60 * 1000);
-const workerChallengeAttempts = createRateLimiter(120, 60 * 1000);
+const workerSocketAuthFailures = createRateLimiter(60, 5 * 60 * 1000);
 
 const getRequestRateLimitKey = (req: Request) => req.socket.remoteAddress || req.ip || 'unknown';
 const getSocketRateLimitKey = (socket: Socket) =>
 	socket.handshake.address || socket.conn.remoteAddress || 'unknown';
-
-const getWorkerAuthKeys = () => {
-	const localPrivateKey = process.env[workerAuthEnv.localPrivateKey];
-	const remotePublicKey = process.env[workerAuthEnv.remotePublicKey];
-
-	if (!localPrivateKey || !remotePublicKey) return undefined;
-
-	return { localPrivateKey, remotePublicKey };
-};
 
 const safeEqual = (left: string, right: string) => {
 	const leftBuffer = Buffer.from(left);
@@ -243,10 +228,10 @@ const parsePasswordHash = (storedHash: string): ParsedPasswordHash | undefined =
 	};
 };
 
-export async function HashClientPassword(password: string) {
+export async function HashSecret(secret: string) {
 	const salt = randomBytes(16).toString('base64url');
 	const hash = await deriveScryptKey(
-		password,
+		secret,
 		salt,
 		scryptKeyLength,
 		scryptCost,
@@ -265,13 +250,13 @@ export async function HashClientPassword(password: string) {
 	].join('$');
 }
 
-export async function VerifyClientPasswordHash(password: string, storedHash: string) {
+export async function VerifySecretHash(secret: string, storedHash: string) {
 	const parsedHash = parsePasswordHash(storedHash);
 	if (!parsedHash) return false;
 
 	const expectedHash = Buffer.from(parsedHash.hash, 'base64url');
 	const candidateHash = await deriveScryptKey(
-		password,
+		secret,
 		parsedHash.salt,
 		parsedHash.keyLength,
 		parsedHash.cost,
@@ -283,6 +268,9 @@ export async function VerifyClientPasswordHash(password: string, storedHash: str
 		expectedHash.length == candidateHash.length && timingSafeEqual(expectedHash, candidateHash)
 	);
 }
+
+export const HashClientPassword = HashSecret;
+export const VerifyClientPasswordHash = VerifySecretHash;
 
 const generateClientAuthPassword = () => randomBytes(24).toString('base64url');
 
@@ -471,91 +459,116 @@ export function IsValidWorkerID(workerID: string) {
 	return workerIDRegex.test(workerID);
 }
 
-export function ValidateAuthConfig() {
-	const workerKeys = getWorkerAuthKeys();
-	if (!workerKeys) {
-		LogGeneratedWorkerAuthKeys();
-		process.exit(1);
-	}
+const generateWorkerToken = () => randomBytes(32).toString('base64url');
 
-	CreatePrivateKeyFromRawPrivateKey(workerKeys.localPrivateKey);
-	CreatePublicKeyFromRawPublicKey(workerKeys.remotePublicKey);
-}
+const toWorkerAuthTokenRecord = (token: WorkerAuthTokenType): WorkerAuthTokenRecordType => ({
+	worker_id: token.worker_id,
+	created_at: token.created_at,
+	updated_at: token.updated_at,
+	last_used_at: token.last_used_at,
+});
 
-function LogGeneratedWorkerAuthKeys() {
-	const serverKeyPair = GenerateWorkerAuthKeyPair();
-	const workerKeyPair = GenerateWorkerAuthKeyPair();
-
-	logger.error(
-		`[auth] Missing ${workerAuthEnv.localPrivateKey}/${workerAuthEnv.remotePublicKey}; worker keypair auth is required.`
-	);
-	logger.info('[auth] Generated server and worker keypairs. Copy these values into compose and restart.');
-	logger.info('[auth] handbrake-server environment:');
-	logger.info(`  - ${workerAuthEnv.localPrivateKey}=${serverKeyPair.privateKey}`);
-	logger.info(`  - ${workerAuthEnv.remotePublicKey}=${workerKeyPair.publicKey}`);
-	logger.info('[auth] handbrake-worker environment:');
-	logger.info(`  - ${workerAuthEnv.localPrivateKey}=${workerKeyPair.privateKey}`);
-	logger.info(`  - ${workerAuthEnv.remotePublicKey}=${serverKeyPair.publicKey}`);
-}
-
-const deleteExpiredWorkerAuthChallenges = () => {
-	const now = Date.now();
-
-	for (const [challengeID, challenge] of workerAuthChallenges.entries()) {
-		if (challenge.expiresAt <= now) {
-			workerAuthChallenges.delete(challengeID);
-		}
+const validateWorkerIDForTokenAction = (workerID: string) => {
+	if (!workerID) return 'Worker ID is required.';
+	if (!IsValidWorkerID(workerID)) {
+		return 'Worker ID must be 1-64 characters and only use letters, numbers, dots, underscores, or hyphens.';
 	}
 };
 
-export function RegisterWorkerAuthRoutes(app: Express) {
-	app.get('/worker/auth/challenge', (req: Request<{}, {}, {}, { workerID?: string }>, res) => {
-		deleteExpiredWorkerAuthChallenges();
-		const rateLimitKey = getRequestRateLimitKey(req);
-		if (workerChallengeAttempts.isLimited(rateLimitKey)) {
-			res.status(429).send('Too many worker auth challenge requests.');
-			return;
-		}
-		workerChallengeAttempts.recordAttempt(rateLimitKey);
+const disconnectWorkerWithToken = (workerID: string, action: string) => {
+	const worker = GetWorkerWithID(workerID);
+	if (!worker) return;
 
-		const workerID = req.query.workerID;
-		const workerKeys = getWorkerAuthKeys();
-		if (!workerKeys) {
-			res.status(503).send('Worker auth is not configured.');
-			return;
-		}
+	logger.info(`[auth] Disconnecting worker '${workerID}' after token ${action}.`);
+	worker.disconnect(true);
+};
 
-		if (!workerID) {
-			res.status(400).send('Missing workerID.');
-			return;
-		}
-		if (!IsValidWorkerID(workerID)) {
-			res.status(400).send('Invalid workerID.');
-			return;
-		}
-		if (workerAuthChallenges.size >= maxPendingWorkerAuthChallenges) {
-			res.status(503).send('Too many pending worker auth challenges.');
-			return;
-		}
+export async function GetWorkerAuthTokenRecords() {
+	const tokens = await DatabaseGetWorkerAuthTokens();
+	return tokens.map(toWorkerAuthTokenRecord);
+}
 
-		const unsignedChallenge: WorkerAuthChallenge = {
-			challengeID: randomUUID(),
-			workerID,
-			nonce: randomBytes(32).toString('base64url'),
-			expiresAt: Date.now() + workerChallengeLifetimeMs,
-			serverSignature: '',
-		};
-		const challenge: WorkerAuthChallenge = {
-			...unsignedChallenge,
-			serverSignature: SignWorkerAuthPayload(
-				GetServerChallengePayload(unsignedChallenge),
-				workerKeys.localPrivateKey
-			),
-		};
+export async function CreateWorkerAuthToken(
+	workerID: string
+): Promise<WorkerAuthTokenSecretResultType> {
+	const normalizedWorkerID = String(workerID ?? '').trim();
+	const validationError = validateWorkerIDForTokenAction(normalizedWorkerID);
+	if (validationError) return { ok: false, message: validationError };
 
-		workerAuthChallenges.set(challenge.challengeID, challenge);
-		res.json(challenge);
+	const existingToken = await DatabaseGetWorkerAuthToken(normalizedWorkerID);
+	if (existingToken) {
+		return { ok: false, message: 'A token already exists for this worker.' };
+	}
+
+	const now = Date.now();
+	const token = generateWorkerToken();
+	const record = await DatabaseInsertWorkerAuthToken({
+		worker_id: normalizedWorkerID,
+		token_hash: await HashSecret(token),
+		created_at: now,
+		updated_at: now,
+		last_used_at: null,
 	});
+
+	if (!record) return { ok: false, message: 'Could not create worker token.' };
+
+	return {
+		ok: true,
+		message: 'Worker token created.',
+		record: toWorkerAuthTokenRecord(record),
+		token,
+	};
+}
+
+export async function RotateWorkerAuthToken(
+	workerID: string
+): Promise<WorkerAuthTokenSecretResultType> {
+	const normalizedWorkerID = String(workerID ?? '').trim();
+	const validationError = validateWorkerIDForTokenAction(normalizedWorkerID);
+	if (validationError) return { ok: false, message: validationError };
+
+	const existingToken = await DatabaseGetWorkerAuthToken(normalizedWorkerID);
+	if (!existingToken) {
+		return { ok: false, message: 'No token exists for this worker.' };
+	}
+
+	const token = generateWorkerToken();
+	const record = await DatabaseUpdateWorkerAuthToken(normalizedWorkerID, {
+		token_hash: await HashSecret(token),
+		updated_at: Date.now(),
+		last_used_at: null,
+	});
+
+	if (!record) return { ok: false, message: 'Could not rotate worker token.' };
+
+	disconnectWorkerWithToken(normalizedWorkerID, 'rotation');
+
+	return {
+		ok: true,
+		message: 'Worker token rotated.',
+		record: toWorkerAuthTokenRecord(record),
+		token,
+	};
+}
+
+export async function RevokeWorkerAuthToken(
+	workerID: string
+): Promise<WorkerAuthTokenActionResultType> {
+	const normalizedWorkerID = String(workerID ?? '').trim();
+	const validationError = validateWorkerIDForTokenAction(normalizedWorkerID);
+	if (validationError) return { ok: false, message: validationError };
+
+	const didDelete = await DatabaseDeleteWorkerAuthToken(normalizedWorkerID);
+	if (!didDelete) {
+		return { ok: false, message: 'No token exists for this worker.' };
+	}
+
+	disconnectWorkerWithToken(normalizedWorkerID, 'revocation');
+
+	return {
+		ok: true,
+		message: 'Worker token revoked.',
+	};
 }
 
 export async function RequireHttpAuth(req: Request, res: Response, next: NextFunction) {
@@ -620,46 +633,51 @@ export function AuthenticateClientSocket(socket: Socket, next: (err?: ExtendedEr
 }
 
 export function AuthenticateWorkerSocket(socket: Socket, next: (err?: ExtendedError) => void) {
-	const workerID = socket.handshake.query['workerID'];
-	const auth = socket.handshake.auth as
-		| { challengeID?: unknown; workerSignature?: unknown }
-		| undefined;
-	const workerKeys = getWorkerAuthKeys();
+	void (async () => {
+		const rateLimitKey = getSocketRateLimitKey(socket);
+		if (workerSocketAuthFailures.isLimited(rateLimitKey)) {
+			logger.warn(`[socket] Rate limited unauthenticated worker connection '${socket.id}'.`);
+			next(new Error('rate limited'));
+			return;
+		}
 
-	if (typeof workerID != 'string' || !IsValidWorkerID(workerID) || !workerKeys) {
-		logger.warn(`[socket] Rejected unauthenticated worker connection '${socket.id}'.`);
-		next(new Error('unauthorized'));
-		return;
-	}
+		const workerID = socket.handshake.query['workerID'];
+		const auth = socket.handshake.auth as { token?: unknown } | undefined;
 
-	if (typeof auth?.challengeID != 'string' || typeof auth.workerSignature != 'string') {
-		logger.warn(`[socket] Rejected worker '${workerID}' with missing auth challenge.`);
-		next(new Error('unauthorized'));
-		return;
-	}
+		if (typeof workerID != 'string' || !IsValidWorkerID(workerID)) {
+			workerSocketAuthFailures.recordFailure(rateLimitKey);
+			logger.warn(`[socket] Rejected worker connection '${socket.id}' with invalid worker ID.`);
+			next(new Error('unauthorized'));
+			return;
+		}
 
-	const challenge = workerAuthChallenges.get(auth.challengeID);
-	workerAuthChallenges.delete(auth.challengeID);
+		if (typeof auth?.token != 'string' || auth.token.length == 0) {
+			workerSocketAuthFailures.recordFailure(rateLimitKey);
+			logger.warn(`[socket] Rejected worker '${workerID}' with missing token.`);
+			next(new Error('unauthorized'));
+			return;
+		}
 
-	if (!challenge || challenge.workerID != workerID || challenge.expiresAt <= Date.now()) {
-		logger.warn(`[socket] Rejected worker '${workerID}' with invalid auth challenge.`);
-		next(new Error('unauthorized'));
-		return;
-	}
+		const tokenRecord = await DatabaseGetWorkerAuthToken(workerID);
+		const isAuthenticated =
+			tokenRecord != undefined && (await VerifySecretHash(auth.token, tokenRecord.token_hash));
 
-	if (
-		VerifyWorkerAuthPayload(
-			GetWorkerChallengePayload(challenge),
-			auth.workerSignature,
-			workerKeys.remotePublicKey
-		)
-	) {
+		if (!isAuthenticated) {
+			workerSocketAuthFailures.recordFailure(rateLimitKey);
+			logger.warn(`[socket] Rejected worker '${workerID}' with invalid token.`);
+			next(new Error('unauthorized'));
+			return;
+		}
+
+		workerSocketAuthFailures.reset(rateLimitKey);
+		await DatabaseUpdateWorkerAuthToken(workerID, { last_used_at: Date.now() });
+		EmitToAllClients('worker-auth-tokens-update', await GetWorkerAuthTokenRecords());
 		next();
-		return;
-	}
-
-	logger.warn(`[socket] Rejected worker '${workerID}' with invalid auth signature.`);
-	next(new Error('unauthorized'));
+	})().catch((err) => {
+		logger.error(`[socket] [error] Could not authenticate worker '${socket.id}'.`);
+		logger.error(err);
+		next(new Error('unauthorized'));
+	});
 }
 
 export function IsCorsOriginAllowed(origin: string | undefined) {

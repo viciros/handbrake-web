@@ -5,6 +5,7 @@ export interface Database {
 	migrations: MigrationsTable;
 	migrations_lock: MigrationsLockTable;
 	client_auth: ClientAuthTable;
+	worker_auth_tokens: WorkerAuthTokensTable;
 	status: StatusTable;
 	jobs: JobsTable;
 	jobs_status: JobsStatusTable;
@@ -37,6 +38,19 @@ export interface ClientAuthTable {
 export type ClientAuthType = Selectable<ClientAuthTable>;
 export type AddClientAuthType = Insertable<ClientAuthTable>;
 export type UpdateClientAuthType = Updateable<ClientAuthTable>;
+
+// Worker Auth Tokens Table -----------------------------------------------------------------------
+export interface WorkerAuthTokensTable {
+	worker_id: string;
+	token_hash: string;
+	created_at: number;
+	updated_at: number;
+	last_used_at: number | null;
+}
+
+export type WorkerAuthTokenType = Selectable<WorkerAuthTokensTable>;
+export type AddWorkerAuthTokenType = Insertable<WorkerAuthTokensTable>;
+export type UpdateWorkerAuthTokenType = Updateable<WorkerAuthTokensTable>;
 
 // Status Table ------------------------------------------------------------------------------------
 export interface StatusTable {
