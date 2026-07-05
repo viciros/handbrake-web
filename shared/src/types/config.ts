@@ -5,7 +5,6 @@ export interface ConfigType extends UnknownConfigType {
 		version: number;
 	};
 	paths: {
-		'media-path': string;
 		'input-path': string;
 		'output-path': string;
 	};

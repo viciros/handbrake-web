@@ -15,10 +15,9 @@ import { RunMigrations } from './utilities/migrator';
 // Defines the latest config schema and default values
 const defaultConfig: ConfigType = {
 	config: {
-		version: 2,
+		version: 3,
 	},
 	paths: {
-		'media-path': '/',
 		'input-path': '/',
 		'output-path': '',
 	},
@@ -62,13 +61,11 @@ export function ValidateConfig(value: UnknownConfigType): ConfigType {
 	}
 	if (
 		!isRecord(value.paths) ||
-		typeof value.paths['media-path'] != 'string' ||
 		typeof value.paths['input-path'] != 'string' ||
 		typeof value.paths['output-path'] != 'string'
 	) {
 		throw new Error("Config section 'paths' is invalid.");
 	}
-	validateConfigPath(value.paths['media-path'], "Config path 'media-path'");
 	validateConfigPath(value.paths['input-path'], "Config path 'input-path'");
 	validateConfigPath(value.paths['output-path'], "Config path 'output-path'", true);
 	if (

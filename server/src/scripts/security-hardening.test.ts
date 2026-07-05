@@ -159,10 +159,9 @@ test('accepts independent configured input and output paths', async () => {
 	assert.doesNotThrow(() =>
 		ValidateConfig({
 			config: {
-				version: 2,
+				version: 3,
 			},
 			paths: {
-				'media-path': '/',
 				'input-path': inputPath,
 				'output-path': outputPath,
 			},

@@ -38,6 +38,7 @@ export async function RunMigrations(latestVersion: number) {
 		const allMigrations = {
 			'migration-1': (await import('../migrations/migration-1')).default as Migration,
 			'migration-2': (await import('../migrations/migration-2')).default as Migration,
+			'migration-3': (await import('../migrations/migration-3')).default as Migration,
 		};
 		const neededMigrations = Object.fromEntries(
 			Object.entries(allMigrations).filter(([key]) => {

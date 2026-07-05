@@ -19,18 +19,6 @@ export default function SettingsPaths({}: HTMLAttributes<HTMLElement>) {
 	return (
 		<Section heading='Locations' className={styles['paths-section']}>
 			<PathInput
-				id='media-path-selection'
-				label='File Browser Root Path'
-				startPath='/'
-				rootPath='/'
-				mode={FileBrowserMode.Directory}
-				allowCreate={false}
-				value={currentConfig.paths['media-path']}
-				onConfirm={(item) => {
-					updatePathProperty('media-path', item.path);
-				}}
-			/>
-			<PathInput
 				id='input-path-selection'
 				label='Default Input Path'
 				startPath='/'

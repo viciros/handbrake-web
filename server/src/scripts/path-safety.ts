@@ -9,11 +9,6 @@ const unique = (values: string[]) => [...new Set(values)];
 
 export const normalizePath = (value: string) => path.resolve(value);
 
-const isFilesystemRoot = (value: string) => {
-	const normalized = normalizePath(value);
-	return normalized == path.parse(normalized).root;
-};
-
 export function IsSubPath(parent: string, child: string) {
 	const relative = path.relative(normalizePath(parent), normalizePath(child));
 	return relative == '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
@@ -21,11 +16,7 @@ export function IsSubPath(parent: string, child: string) {
 
 export function GetMediaRoots() {
 	const config = GetConfig();
-	const roots = [
-		config.paths['input-path'],
-		config.paths['output-path'],
-		isFilesystemRoot(config.paths['media-path']) ? undefined : config.paths['media-path'],
-	]
+	const roots = [config.paths['input-path'], config.paths['output-path']]
 		.filter((value): value is string => typeof value == 'string' && value.length > 0)
 		.map(normalizePath);
 
