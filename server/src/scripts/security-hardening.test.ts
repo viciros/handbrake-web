@@ -40,6 +40,21 @@ test('rejects placeholder admin credentials', async () => {
 	assert.throws(() => ValidateAuthConfig(), /placeholder/);
 });
 
+test('validates signed client auth session tokens', async () => {
+	const { CreateClientAuthSessionToken, IsClientAuthSessionTokenValid } = await import('./auth');
+
+	process.env.HANDBRAKE_WEB_USERNAME = 'web-user';
+	process.env.HANDBRAKE_WEB_PASSWORD = 'web-password';
+
+	const token = CreateClientAuthSessionToken('web-user');
+	const tamperedToken = `${token.slice(0, -1)}x`;
+	const wrongUserToken = CreateClientAuthSessionToken('other-user');
+
+	assert.equal(IsClientAuthSessionTokenValid(token), true);
+	assert.equal(IsClientAuthSessionTokenValid(tamperedToken), false);
+	assert.equal(IsClientAuthSessionTokenValid(wrongUserToken), false);
+});
+
 test('validates worker IDs', async () => {
 	const { IsValidWorkerID } = await import('./auth');
 

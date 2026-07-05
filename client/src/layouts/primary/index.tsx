@@ -12,42 +12,6 @@ import NoConnection from '~pages/_default/no-connection';
 import { PrimaryContext } from './context';
 // import styles from './styles.module.scss';
 
-type Credentials = {
-	username: string;
-	password: string;
-};
-
-const credentialsStorageKey = 'handbrake-web-credentials';
-
-const readStoredCredentials = () => {
-	try {
-		const storedCredentials = sessionStorage.getItem(credentialsStorageKey);
-		return storedCredentials ? (JSON.parse(storedCredentials) as Credentials) : null;
-	} catch {
-		return null;
-	}
-};
-
-const writeStoredCredentials = (credentials: Credentials) => {
-	sessionStorage.setItem(credentialsStorageKey, JSON.stringify(credentials));
-};
-
-const clearStoredCredentials = () => {
-	sessionStorage.removeItem(credentialsStorageKey);
-};
-
-const promptForCredentials = (): Credentials | null => {
-	const username = window.prompt('HandBrake Web username');
-	if (!username) return null;
-
-	const password = window.prompt('HandBrake Web password');
-	if (password == null) return null;
-
-	const credentials = { username, password };
-	writeStoredCredentials(credentials);
-	return credentials;
-};
-
 export default function PrimaryLayout() {
 	const baseURLRegex = /(^https?:\/\/.+\/)(.+$)/;
 	const serverURL = (
@@ -57,10 +21,7 @@ export default function PrimaryLayout() {
 	const serverSocketPath = 'client';
 	const server = `${serverURL}${serverSocketPath}`;
 
-	const [credentials, setCredentials] = useState<Credentials | null>(readStoredCredentials);
-	const [socket] = useState(() =>
-		io(server, { autoConnect: false, auth: credentials ?? undefined })
-	);
+	const [socket] = useState(() => io(server, { autoConnect: false, withCredentials: true }));
 	const [isConnected, setIsConnected] = useState(false);
 	const [config, setConfig] = useState<ConfigType>();
 	const [queue, setQueue] = useState<QueueType>([]);
@@ -77,22 +38,13 @@ export default function PrimaryLayout() {
 
 	// Connect to server -------------------------------------------------------
 	useEffect(() => {
-		if (!credentials) {
-			const newCredentials = promptForCredentials();
-			if (newCredentials) {
-				setCredentials(newCredentials);
-			}
-			return;
-		}
-
 		console.log(`[client] Connecting to '${server}...'`);
-		socket.auth = credentials;
 		socket.connect();
 
 		return () => {
 			socket.disconnect();
 		};
-	}, [credentials, server, socket]);
+	}, [server, socket]);
 
 	// Error event listeners ---------------------------------------------------
 	const onConnect = () => {
@@ -104,11 +56,6 @@ export default function PrimaryLayout() {
 		console.error(`[client] Error has occurred connecting to '${server}':`);
 		console.error(error);
 		setIsConnected(false);
-
-		if (error.message == 'unauthorized') {
-			clearStoredCredentials();
-			setCredentials(null);
-		}
 	};
 
 	const onDisconnect = (reason: string) => {

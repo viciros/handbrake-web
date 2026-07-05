@@ -9,7 +9,7 @@ import {
 	type WorkerAuthChallenge,
 } from '@handbrake-web/shared/scripts/worker-auth';
 import type { Express, NextFunction, Request, Response } from 'express';
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { ExtendedError, Socket } from 'socket.io';
 
 import logger from 'logging';
@@ -17,6 +17,12 @@ import logger from 'logging';
 type Credentials = {
 	username: string;
 	password: string;
+};
+
+type ClientAuthSession = {
+	username: string;
+	expiresAt: number;
+	nonce: string;
 };
 
 const userAuthEnv = {
@@ -27,6 +33,9 @@ const workerAuthEnv = {
 	localPrivateKey: 'local_private_key',
 	remotePublicKey: 'remote_public_key',
 };
+const clientAuthSessionCookieName = 'handbrake-web-client-auth';
+const clientAuthSessionLifetimeMs = 12 * 60 * 60 * 1000;
+const clientAuthSessionSecret = randomBytes(32);
 const workerChallengeLifetimeMs = 60_000;
 const maxPendingWorkerAuthChallenges = 1000;
 const workerIDRegex = /^[A-Za-z0-9._-]{1,64}$/;
@@ -129,6 +138,24 @@ const parseBasicAuth = (header: string | undefined): Credentials | undefined => 
 	}
 };
 
+const parseCookieHeader = (header: string | undefined) => {
+	const cookies = new Map<string, string>();
+	if (!header) return cookies;
+
+	for (const cookie of header.split(';')) {
+		const separatorIndex = cookie.indexOf('=');
+		if (separatorIndex < 0) continue;
+
+		const name = cookie.slice(0, separatorIndex).trim();
+		const value = cookie.slice(separatorIndex + 1).trim();
+		if (name) {
+			cookies.set(name, value);
+		}
+	}
+
+	return cookies;
+};
+
 const authenticateUser = (credentials: Credentials | undefined) => {
 	const expected = getServerCredentials();
 	if (!expected || !credentials) return false;
@@ -143,6 +170,71 @@ const isPlaceholderCredentials = (credentials: Credentials) =>
 	credentials.password == 'change-this-password' ||
 	credentials.password == credentials.username ||
 	(credentials.username == 'admin' && credentials.password == 'admin');
+
+const signClientAuthSessionPayload = (payload: string) =>
+	createHmac('sha256', clientAuthSessionSecret).update(payload).digest('base64url');
+
+export function CreateClientAuthSessionToken(username: string) {
+	const session: ClientAuthSession = {
+		username,
+		expiresAt: Date.now() + clientAuthSessionLifetimeMs,
+		nonce: randomBytes(16).toString('base64url'),
+	};
+	const payload = Buffer.from(JSON.stringify(session)).toString('base64url');
+	const signature = signClientAuthSessionPayload(payload);
+
+	return `${payload}.${signature}`;
+}
+
+export function IsClientAuthSessionTokenValid(token: string | undefined) {
+	if (!token) return false;
+
+	const parts = token.split('.');
+	if (parts.length != 2 || !parts[0] || !parts[1]) return false;
+
+	const [payload, signature] = parts;
+	const expectedSignature = signClientAuthSessionPayload(payload);
+	if (!safeEqual(signature, expectedSignature)) return false;
+
+	try {
+		const session = JSON.parse(
+			Buffer.from(payload, 'base64url').toString('utf-8')
+		) as Partial<ClientAuthSession>;
+		const expectedCredentials = getServerCredentials();
+
+		return (
+			!!expectedCredentials &&
+			session.username == expectedCredentials.username &&
+			typeof session.expiresAt == 'number' &&
+			Number.isSafeInteger(session.expiresAt) &&
+			session.expiresAt > Date.now() &&
+			typeof session.nonce == 'string' &&
+			session.nonce.length > 0
+		);
+	} catch {
+		return false;
+	}
+}
+
+const getClientAuthSessionCookie = (cookieHeader: string | undefined) =>
+	parseCookieHeader(cookieHeader).get(clientAuthSessionCookieName);
+
+const isSecureRequest = (req: Request) =>
+	req.secure ||
+	String(req.header('x-forwarded-proto') || '')
+		.split(',')
+		.map((value) => value.trim().toLowerCase())
+		.includes('https');
+
+const setClientAuthSessionCookie = (req: Request, res: Response, credentials: Credentials) => {
+	res.cookie(clientAuthSessionCookieName, CreateClientAuthSessionToken(credentials.username), {
+		httpOnly: true,
+		maxAge: clientAuthSessionLifetimeMs,
+		path: '/',
+		sameSite: 'lax',
+		secure: isSecureRequest(req),
+	});
+};
 
 export function IsValidWorkerID(workerID: string) {
 	return workerIDRegex.test(workerID);
@@ -259,8 +351,16 @@ export function RequireHttpAuth(req: Request, res: Response, next: NextFunction)
 		return;
 	}
 
-	if (authenticateUser(parseBasicAuth(req.header('authorization')))) {
+	if (IsClientAuthSessionTokenValid(getClientAuthSessionCookie(req.header('cookie')))) {
 		httpAuthFailures.reset(rateLimitKey);
+		next();
+		return;
+	}
+
+	const credentials = parseBasicAuth(req.header('authorization'));
+	if (credentials && authenticateUser(credentials)) {
+		httpAuthFailures.reset(rateLimitKey);
+		setClientAuthSessionCookie(req, res, credentials);
 		next();
 		return;
 	}
@@ -281,6 +381,9 @@ export function AuthenticateClientSocket(socket: Socket, next: (err?: ExtendedEr
 	const auth = socket.handshake.auth as Partial<Credentials> | undefined;
 
 	if (
+		IsClientAuthSessionTokenValid(
+			getClientAuthSessionCookie(socket.request.headers.cookie)
+		) ||
 		authenticateUser({
 			username: String(auth?.username ?? ''),
 			password: String(auth?.password ?? ''),
