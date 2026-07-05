@@ -42,7 +42,7 @@ export class ByteLimitTransform extends Transform {
 	_transform(chunk: Buffer, encoding: BufferEncoding, callback: TransformCallback) {
 		this.bytesSeen += chunk.length;
 		if (this.bytesSeen > this.maxBytes) {
-			callback(new UploadTooLargeError('Output upload is larger than the job input.'));
+			callback(new UploadTooLargeError('Output upload is larger than the allowed limit.'));
 			return;
 		}
 
@@ -159,12 +159,14 @@ export function ValidateOutputUploadContentLength(
 		return {
 			ok: false as const,
 			status: 413,
-			message: 'Output upload is larger than the job input.',
+			message: 'Output upload is larger than the allowed limit.',
 		};
 	}
 
 	return { ok: true as const, contentLength };
 }
+
+export const GetMaxOutputUploadBytes = (inputSize: number) => inputSize * 2;
 
 export async function CreateWorkerTransferLease(
 	workerID: string,
@@ -281,9 +283,10 @@ export function RegisterWorkerTransferRoutes(app: Express) {
 				res.status(400).send('Job input is not a file.');
 				return;
 			}
+			const maxOutputUploadBytes = GetMaxOutputUploadBytes(inputStats.size);
 			const contentLengthResult = ValidateOutputUploadContentLength(
 				getRequestContentLength(req),
-				inputStats.size
+				maxOutputUploadBytes
 			);
 			if (!contentLengthResult.ok) {
 				res.status(contentLengthResult.status).send(contentLengthResult.message);
@@ -295,7 +298,7 @@ export function RegisterWorkerTransferRoutes(app: Express) {
 
 			await pipeline(
 				req,
-				new ByteLimitTransform(inputStats.size),
+				new ByteLimitTransform(maxOutputUploadBytes),
 				createWriteStream(tempOutputPath, { flags: 'wx' })
 			);
 			await rename(tempOutputPath, outputPath);
@@ -315,7 +318,7 @@ export function RegisterWorkerTransferRoutes(app: Express) {
 
 			if (!res.headersSent) {
 				if (err instanceof UploadTooLargeError) {
-					res.status(413).send('Output upload is larger than the job input.');
+					res.status(413).send('Output upload is larger than the allowed limit.');
 				} else {
 					res.status(500).send('Could not receive job output.');
 				}

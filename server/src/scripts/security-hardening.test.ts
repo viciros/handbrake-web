@@ -49,27 +49,30 @@ test('validates worker IDs', async () => {
 	assert.equal(IsValidWorkerID('x'.repeat(65)), false);
 });
 
-test('validates output upload Content-Length against the input size', async () => {
-	const { ValidateOutputUploadContentLength } = await import('./worker-transfers');
+test('validates output upload Content-Length against 2x the input size', async () => {
+	const { GetMaxOutputUploadBytes, ValidateOutputUploadContentLength } = await import(
+		'./worker-transfers'
+	);
+	const maxOutputUploadBytes = GetMaxOutputUploadBytes(10);
 
-	assert.deepEqual(ValidateOutputUploadContentLength(undefined, 10), {
+	assert.deepEqual(ValidateOutputUploadContentLength(undefined, maxOutputUploadBytes), {
 		ok: false,
 		status: 411,
 		message: 'Missing Content-Length.',
 	});
-	assert.deepEqual(ValidateOutputUploadContentLength(null, 10), {
+	assert.deepEqual(ValidateOutputUploadContentLength(null, maxOutputUploadBytes), {
 		ok: false,
 		status: 400,
 		message: 'Invalid Content-Length.',
 	});
-	assert.deepEqual(ValidateOutputUploadContentLength(11, 10), {
+	assert.deepEqual(ValidateOutputUploadContentLength(21, maxOutputUploadBytes), {
 		ok: false,
 		status: 413,
-		message: 'Output upload is larger than the job input.',
+		message: 'Output upload is larger than the allowed limit.',
 	});
-	assert.deepEqual(ValidateOutputUploadContentLength(10, 10), {
+	assert.deepEqual(ValidateOutputUploadContentLength(20, maxOutputUploadBytes), {
 		ok: true,
-		contentLength: 10,
+		contentLength: 20,
 	});
 });
 
