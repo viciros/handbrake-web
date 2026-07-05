@@ -13,10 +13,11 @@ handbrake-server:
     - /path/to/your/media:/video
 
 handbrake-worker:
-  # no /video mount required
+  volumes:
+    - /mnt/cache/handbrake-web-worker-tmp:/tmp/handbrake-web
 ```
 
-Workers need enough local temp/data space for the input file plus the output file for the job they are running.
+Workers do not need `/video`, but mapping `/tmp/handbrake-web` gives active transcodes explicit temp space outside Docker's writable container layer. The temp path needs enough space for the input file plus the output file for the job the worker is running.
 
 ## How Jobs Move Through The System
 
