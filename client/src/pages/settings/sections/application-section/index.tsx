@@ -40,6 +40,7 @@ export default function SettingsApplication() {
 				value={currentConfig.application['update-check-interval']}
 				onChange={handleIntervalChange}
 			/>
+			<p className={styles['field-note']}>Set to 0 to disable update checks.</p>
 			<SelectInput
 				label='Queue State On Startup'
 				value={currentConfig.application['queue-startup-behavior']}
