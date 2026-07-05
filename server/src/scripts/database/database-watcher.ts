@@ -3,6 +3,7 @@ import {
 	type AddWatcherType,
 	type DetailedWatcherType,
 	type UpdateWatcherRuleType,
+	type UpdateWatcherType,
 	type WatcherRuleType,
 } from '@handbrake-web/shared/types/database';
 import { jsonArrayFrom } from 'kysely/helpers/sqlite';
@@ -91,6 +92,27 @@ export async function DatabaseInsertWatcher(watcher: AddWatcherType) {
 	} catch (err) {
 		logger.error(
 			`[server] [database] [error] Could not add a watcher for '${watcher.watch_path}' to the database.`
+		);
+		throw err;
+	}
+}
+
+export async function DatabaseUpdateWatcher(watcher_id: number, values: UpdateWatcherType) {
+	try {
+		await database
+			.updateTable('watchers')
+			.set(values)
+			.where('watcher_id', '=', watcher_id)
+			.execute();
+
+		logger.info(
+			`[server] [database] Updated watcher with id '${watcher_id}' in the database.`
+		);
+
+		return DatabaseGetDetailedWatcherByID(watcher_id);
+	} catch (err) {
+		logger.error(
+			`[server] [database] [error] Could not update watcher with id '${watcher_id}' in the database.`
 		);
 		throw err;
 	}

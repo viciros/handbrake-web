@@ -7,6 +7,7 @@ import type {
 	DetailedWatcherRuleType,
 	DetailedWatcherType,
 	UpdateWatcherRuleType,
+	UpdateWatcherType,
 } from '@handbrake-web/shared/types/database';
 import { QueueStatus } from '@handbrake-web/shared/types/queue';
 import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
@@ -33,6 +34,7 @@ import {
 	DatabaseGetWatcherRuleByID,
 	DatabaseInsertWatcher,
 	DatabaseInsertWatcherRule,
+	DatabaseUpdateWatcher,
 	RemoveWatcherFromDatabase,
 	RemoveWatcherRuleFromDatabase,
 	UpdateWatcherRuleInDatabase,
@@ -556,6 +558,26 @@ export async function AddWatcher(watcher: AddWatcherType) {
 export async function RemoveWatcher(watcherID: number) {
 	await RemoveWatcherFromDatabase(watcherID);
 	await DeregisterWatcher(watcherID);
+	await UpdateWatchers();
+}
+
+export async function UpdateWatcher(watcherID: number, watcher: UpdateWatcherType) {
+	if (watcher.watch_path) {
+		watcher.watch_path = await AssertExistingDirectoryInMediaRoots(
+			watcher.watch_path,
+			'watch path'
+		);
+	}
+	if (watcher.output_path) {
+		watcher.output_path = await AssertExistingDirectoryInMediaRoots(
+			watcher.output_path,
+			'watcher output path'
+		);
+	}
+
+	await DeregisterWatcher(watcherID);
+	const updatedWatcher = await DatabaseUpdateWatcher(watcherID, watcher);
+	await RegisterWatcher(updatedWatcher);
 	await UpdateWatchers();
 }
 

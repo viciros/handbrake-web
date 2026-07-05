@@ -10,6 +10,7 @@ import {
 	WatcherRuleStringComparisonMethods,
 } from '@handbrake-web/shared/types/watcher';
 import AddIcon from '@icons/plus-lg.svg?react';
+import EditIcon from '@icons/pencil-fill.svg?react';
 import TrashIcon from '@icons/trash-fill.svg?react';
 import { HTMLAttributes } from 'react';
 import TextInfo from '~components/base/info/text-info';
@@ -20,6 +21,7 @@ import styles from './styles.module.scss';
 interface Properties extends HTMLAttributes<HTMLDivElement> {
 	watcher: DetailedWatcherType;
 	index: number;
+	handleEditWatcher: (watcher: DetailedWatcherType) => void;
 	handleRemoveWatcher: (id: number) => void;
 	handleAddRule: (id: number, rule: AddWatcherRuleType) => void;
 	handleUpdateRule: (id: number, rule: UpdateWatcherRuleType) => void;
@@ -29,6 +31,7 @@ interface Properties extends HTMLAttributes<HTMLDivElement> {
 export default function WatcherCard({
 	watcher,
 	index,
+	handleEditWatcher,
 	handleRemoveWatcher,
 	handleAddRule,
 	handleUpdateRule,
@@ -57,13 +60,22 @@ export default function WatcherCard({
 				<div className={styles['info']}>
 					<div className={styles['header']}>
 						<h5 className={styles['heading']}>Info</h5>
-						<ButtonInput
-							className={styles['button']}
-							Icon={TrashIcon}
-							color='red'
-							title='Remove Watcher'
-							onClick={() => handleRemoveWatcher(watcher.watcher_id)}
-						/>
+						<div className={styles['actions']}>
+							<ButtonInput
+								className={styles['button']}
+								Icon={EditIcon}
+								color='blue'
+								title='Edit Watcher'
+								onClick={() => handleEditWatcher(watcher)}
+							/>
+							<ButtonInput
+								className={styles['button']}
+								Icon={TrashIcon}
+								color='red'
+								title='Remove Watcher'
+								onClick={() => handleRemoveWatcher(watcher.watcher_id)}
+							/>
+						</div>
 					</div>
 					<div className={styles['content']}>
 						<TextInfo className={styles['text-info']} label='Watching Path'>

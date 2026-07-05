@@ -1,5 +1,9 @@
 import { FirstLetterUpperCase } from '@handbrake-web/shared/funcs/string.funcs';
-import { AddWatcherType } from '@handbrake-web/shared/types/database';
+import {
+	AddWatcherType,
+	DetailedWatcherType,
+	UpdateWatcherType,
+} from '@handbrake-web/shared/types/database';
 import { DirectoryItemType } from '@handbrake-web/shared/types/directory';
 import { FileBrowserMode } from '@handbrake-web/shared/types/file-browser';
 import React, { HTMLAttributes, useContext, useState } from 'react';
@@ -12,21 +16,25 @@ import { PrimaryContext } from '~layouts/primary/context';
 import styles from './styles.module.scss';
 
 interface Properties extends HTMLAttributes<HTMLDivElement> {
+	watcher?: DetailedWatcherType;
 	onClose: () => void;
 }
 
-export default function RegisterWatcher({ onClose }: Properties) {
+export default function RegisterWatcher({ watcher, onClose }: Properties) {
 	const { config, presets, defaultPresets, socket } = useContext(PrimaryContext)!;
 	const configuredOutputPath = config.paths['output-path'] || config.paths['input-path'];
-
-	const [watchPath, setWatchPath] = useState('');
-	const [outputPath, setOutputPath] = useState('');
-	const [presetCategory, setPresetCategory] = useState('');
-	const [presetID, setPresetID] = useState('');
-	const [startQueue, setStartQueue] = useState(false);
-	const [isDefaultPreset, setIsDefaultPreset] = useState(false);
-
+	const isEditMode = watcher != undefined;
 	const isDefaultPresetCategory = (category: string) => category.includes('Default: ');
+
+	const [watchPath, setWatchPath] = useState(watcher?.watch_path || '');
+	const [outputPath, setOutputPath] = useState(watcher?.output_path || '');
+	const [presetCategory, setPresetCategory] = useState(watcher?.preset_category || '');
+	const [presetID, setPresetID] = useState(watcher?.preset_id || '');
+	const [startQueue, setStartQueue] = useState(Boolean(watcher?.start_queue));
+	const [isDefaultPreset, setIsDefaultPreset] = useState(
+		isDefaultPresetCategory(watcher?.preset_category || '')
+	);
+
 	const presetOptions = isDefaultPreset
 		? Object.keys(defaultPresets[presetCategory.replace(/^Default:\s/, '')] || {})
 		: Object.keys(presets[presetCategory] || {});
@@ -63,14 +71,18 @@ export default function RegisterWatcher({ onClose }: Properties) {
 	};
 
 	const handleSubmit = () => {
-		const newWatcher: AddWatcherType = {
+		const watcherValues: AddWatcherType | UpdateWatcherType = {
 			watch_path: watchPath,
 			output_path: outputPath ? outputPath : null,
 			preset_category: presetCategory,
 			preset_id: presetID,
 			start_queue: startQueue,
 		};
-		socket.emit('add-watcher', newWatcher);
+		if (watcher) {
+			socket.emit('update-watcher', watcher.watcher_id, watcherValues);
+		} else {
+			socket.emit('add-watcher', watcherValues);
+		}
 		onClose();
 	};
 
@@ -80,7 +92,9 @@ export default function RegisterWatcher({ onClose }: Properties) {
 
 	return (
 		<Overlay className={styles['register-watcher']}>
-			<h1 className={styles['heading']}>Register Watcher</h1>
+			<h1 className={styles['heading']}>
+				{isEditMode ? 'Edit Watcher' : 'Register Watcher'}
+			</h1>
 			<div className={styles['fields']}>
 				<div className={styles['fields-section']}>
 					<PathInput
@@ -184,7 +198,7 @@ export default function RegisterWatcher({ onClose }: Properties) {
 				<div className={styles['buttons-section']}>
 					<ButtonInput label='Cancel' color='red' onClick={handleCancel} />
 					<ButtonInput
-						label='Submit'
+						label={isEditMode ? 'Save' : 'Submit'}
 						color='green'
 						disabled={!canSubmit}
 						onClick={handleSubmit}

@@ -12,7 +12,7 @@ interface Properties {
 }
 
 export default function QueueSection({ queue }: Properties) {
-	const formatFinishedAt = (timeFinished: number) =>
+	const formatTime = (timeFinished: number) =>
 		timeFinished ? new Date(timeFinished).toLocaleString() : 'N/A';
 
 	return (
@@ -25,7 +25,7 @@ export default function QueueSection({ queue }: Properties) {
 						<th>Output</th>
 						<th>Worker</th>
 						<th>Status</th>
-						<th>Finished</th>
+						<th>Time</th>
 						<th>Progress</th>
 					</tr>
 				</thead>
@@ -98,7 +98,7 @@ export default function QueueSection({ queue }: Properties) {
 									>
 										{TranscodeStage[job.transcode_stage || 0]}
 									</td>
-									<td align='center'>{formatFinishedAt(job.time_finished)}</td>
+									<td align='center'>{formatTime(job.time_finished)}</td>
 									<td className={styles['progress']}>
 										<ProgressBar
 											className={styles['percentage']}

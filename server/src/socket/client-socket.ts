@@ -5,6 +5,7 @@ import type {
 	AddWatcherType,
 	DetailedWatcherType,
 	UpdateWatcherRuleType,
+	UpdateWatcherType,
 } from '@handbrake-web/shared/types/database';
 import type {
 	UpdateClientCredentialsResultType,
@@ -64,6 +65,7 @@ import {
 	AddWatcherRule,
 	RemoveWatcher,
 	RemoveWatcherRule,
+	UpdateWatcher,
 	UpdateWatcherRule,
 } from 'scripts/watcher';
 import { Socket as Client, Server } from 'socket.io';
@@ -355,6 +357,10 @@ export default function ClientSocket(io: Server) {
 
 		socket.on('remove-watcher', async (id: number) => {
 			await RemoveWatcher(id);
+		});
+
+		socket.on('update-watcher', async (id: number, watcher: UpdateWatcherType) => {
+			await UpdateWatcher(id, watcher);
 		});
 
 		socket.on('add-watcher-rule', async (watcherID: number, rule: AddWatcherRuleType) => {

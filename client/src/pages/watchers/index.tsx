@@ -1,4 +1,8 @@
-import { AddWatcherRuleType, UpdateWatcherRuleType } from '@handbrake-web/shared/types/database';
+import {
+	AddWatcherRuleType,
+	DetailedWatcherType,
+	UpdateWatcherRuleType,
+} from '@handbrake-web/shared/types/database';
 import RegisterIcon from '@icons/plus-lg.svg?react';
 import { useContext, useState } from 'react';
 import ButtonInput from '~components/base/inputs/button';
@@ -13,9 +17,20 @@ export default function WatchersPage() {
 	const { socket, watchers } = useContext(PrimaryContext)!;
 
 	const [showRegisterOverlay, setShowRegisterOverlay] = useState(false);
+	const [editingWatcher, setEditingWatcher] = useState<DetailedWatcherType>();
 
 	const handleNewWatcher = () => {
+		setEditingWatcher(undefined);
 		setShowRegisterOverlay(true);
+	};
+
+	const handleEditWatcher = (watcher: DetailedWatcherType) => {
+		setEditingWatcher(watcher);
+	};
+
+	const handleCloseWatcherOverlay = () => {
+		setShowRegisterOverlay(false);
+		setEditingWatcher(undefined);
 	};
 
 	const handleRemoveWatcher = (rowid: number) => {
@@ -65,6 +80,7 @@ export default function WatchersPage() {
 						<WatcherCard
 							watcher={watcher}
 							index={index}
+							handleEditWatcher={handleEditWatcher}
 							handleRemoveWatcher={handleRemoveWatcher}
 							handleAddRule={handleAddRule}
 							handleUpdateRule={handleUpdateRule}
@@ -74,8 +90,8 @@ export default function WatchersPage() {
 					))}
 				</Section>
 			)}
-			{showRegisterOverlay && (
-				<RegisterWatcher onClose={() => setShowRegisterOverlay(false)} />
+			{(showRegisterOverlay || editingWatcher) && (
+				<RegisterWatcher watcher={editingWatcher} onClose={handleCloseWatcherOverlay} />
 			)}
 		</Page>
 	);
