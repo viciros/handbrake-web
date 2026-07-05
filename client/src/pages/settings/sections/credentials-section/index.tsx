@@ -11,7 +11,6 @@ export default function SettingsCredentials() {
 		<Section heading='Credentials'>
 			<ClientCredentialsForm
 				currentUsername={authStatus.username}
-				requireUsernameChange={authStatus.must_change_credentials}
 				onSubmit={(data, callback) => {
 					socket.emit(
 						'update-client-credentials',

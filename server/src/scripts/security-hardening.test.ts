@@ -52,7 +52,8 @@ test('hashes client auth passwords', async () => {
 test('initializes generated client auth credentials', async () => {
 	const { DatabaseConnect } = await import('./database/database');
 	const { DatabaseGetClientAuth } = await import('./database/database-auth');
-	const { InitializeClientAuth, VerifyClientPasswordHash } = await import('./auth');
+	const { InitializeClientAuth, UpdateClientAuthCredentials, VerifyClientPasswordHash } =
+		await import('./auth');
 
 	await DatabaseConnect();
 	const result = await InitializeClientAuth();
@@ -67,6 +68,16 @@ test('initializes generated client auth credentials', async () => {
 		await VerifyClientPasswordHash(result.generatedPassword, storedCredentials.password_hash),
 		true
 	);
+
+	const updateResult = await UpdateClientAuthCredentials({
+		current_password: result.generatedPassword,
+		username: 'admin',
+		new_password: 'changed-password-value',
+	});
+
+	assert.equal(updateResult.ok, true);
+	assert.equal(updateResult.status?.username, 'admin');
+	assert.equal(updateResult.status?.must_change_credentials, false);
 });
 
 test('validates signed client auth session tokens', async () => {

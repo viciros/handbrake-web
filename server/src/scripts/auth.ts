@@ -290,13 +290,12 @@ const logGeneratedClientAuthCredentials = (password: string) => {
 	logger.warn('[auth] Created initial web UI credentials.');
 	logger.warn(`[auth] Username: ${defaultClientAuthUsername}`);
 	logger.warn(`[auth] Password: ${password}`);
-	logger.warn('[auth] Change the username and password in the web UI after signing in.');
+	logger.warn('[auth] Change the password in the web UI after signing in.');
 };
 
 const validateNewClientCredentials = (
 	username: string,
-	password: string,
-	currentCredentials = requireLoadedClientAuthCredentials()
+	password: string
 ) => {
 	if (!username) return 'Username is required.';
 	if (username.length > usernameMaxLength) {
@@ -314,12 +313,6 @@ const validateNewClientCredentials = (
 	}
 	if (password == username || password == 'change-this-password') {
 		return 'Password must not match a placeholder value.';
-	}
-	if (
-		currentCredentials.must_change_credentials &&
-		safeEqual(username, currentCredentials.username)
-	) {
-		return 'Choose a new username.';
 	}
 };
 
@@ -448,11 +441,7 @@ export async function UpdateClientAuthCredentials(
 		return { ok: false, message: 'Current password is incorrect.' };
 	}
 
-	const validationError = validateNewClientCredentials(
-		username,
-		newPassword,
-		currentCredentials
-	);
+	const validationError = validateNewClientCredentials(username, newPassword);
 	if (validationError) {
 		return { ok: false, message: validationError };
 	}

@@ -97,7 +97,7 @@ services:
 
 On first setup, you can leave the key values out and start the server once. It will log a server keypair and worker keypair, then exit. Copy those generated `local_private_key` and `remote_public_key` values into your compose file and restart the server and worker.
 
-On the first successful server start, HandBrake Web logs a generated web UI password for the default username `admin`. Sign in with those credentials, then change the username and password when prompted. The password is stored only as a salted hash in the server database.
+On the first successful server start, HandBrake Web logs a generated web UI password for the default username `admin`. Sign in with those credentials, then change the password when prompted. You can also change the username. The password is stored only as a salted hash in the server database.
 
 ## Usage
 

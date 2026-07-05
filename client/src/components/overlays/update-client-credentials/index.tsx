@@ -11,10 +11,9 @@ export default function UpdateClientCredentials() {
 	return (
 		<Overlay className={styles['update-client-credentials']}>
 			<div className={styles['wrapper']}>
-				<h1>Change Username and Password</h1>
+				<h1>Change Credentials</h1>
 				<ClientCredentialsForm
 					currentUsername={authStatus.username}
-					requireUsernameChange={authStatus.must_change_credentials}
 					submitLabel='Update Credentials'
 					onSubmit={(data, callback) => {
 						socket.emit(

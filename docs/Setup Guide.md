@@ -117,7 +117,7 @@ environment:
 
 If `local_private_key` or `remote_public_key` is missing on server startup, the server logs a generated server keypair and worker keypair, then exits. Copy the generated values into your compose file and restart.
 
-On the first successful server start, HandBrake Web logs a generated web UI password for the default username `admin`. Sign in with those credentials, then change the username and password when prompted. The password is stored only as a salted hash in the server database.
+On the first successful server start, HandBrake Web logs a generated web UI password for the default username `admin`. Sign in with those credentials, then change the password when prompted. You can also change the username. The password is stored only as a salted hash in the server database.
 
 In your worker configuration, ensure the following environment variables are properly configured:
 

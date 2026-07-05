@@ -10,7 +10,6 @@ import styles from './styles.module.scss';
 
 type Properties = {
 	currentUsername: string;
-	requireUsernameChange?: boolean;
 	submitLabel?: string;
 	onSubmit: (
 		data: UpdateClientCredentialsType,
@@ -20,7 +19,6 @@ type Properties = {
 
 export default function ClientCredentialsForm({
 	currentUsername,
-	requireUsernameChange = false,
 	submitLabel = 'Save Credentials',
 	onSubmit,
 }: Properties) {
@@ -32,16 +30,12 @@ export default function ClientCredentialsForm({
 	const [isSaving, setIsSaving] = useState(false);
 
 	const trimmedUsername = username.trim();
-	const usernameChanged = trimmedUsername != currentUsername;
 	const passwordsMatch = newPassword == confirmPassword;
-	const displayMessage =
-		requireUsernameChange && !usernameChanged ? 'Choose a new username.' : message;
 	const canSubmit =
 		currentPassword.length > 0 &&
 		trimmedUsername.length > 0 &&
 		newPassword.length >= 12 &&
 		passwordsMatch &&
-		(!requireUsernameChange || usernameChanged) &&
 		!isSaving;
 
 	const handleSubmit = () => {
@@ -103,7 +97,7 @@ export default function ClientCredentialsForm({
 					onChange={(event) => setConfirmPassword(event.target.value)}
 				/>
 			</div>
-			{displayMessage && <div className={styles['message']}>{displayMessage}</div>}
+			{message && <div className={styles['message']}>{message}</div>}
 			<div className={styles['buttons']}>
 				<ButtonInput
 					label={isSaving ? 'Saving' : submitLabel}
