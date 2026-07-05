@@ -132,7 +132,13 @@ jobs:
             else
               changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
 
-              if grep -Eq '^(handbrake/build\.Dockerfile|\.github/workflows/docker-publish\.yaml)$' <<< "$changed_files"; then
+              if [[ "$event_name" == "release" ]]; then
+                base_rebuild_pattern='^handbrake/build\.Dockerfile$'
+              else
+                base_rebuild_pattern='^(handbrake/build\.Dockerfile|\.github/workflows/docker-publish\.yaml)$'
+              fi
+
+              if grep -Eq "$base_rebuild_pattern" <<< "$changed_files"; then
                 should_build=true
               fi
             fi
