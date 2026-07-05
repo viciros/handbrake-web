@@ -30,6 +30,38 @@ type Props = {
 const formatTimestamp = (timestamp: number | null) =>
 	timestamp ? new Date(timestamp).toLocaleString() : 'Never';
 
+const copyTextFallback = (text: string) => {
+	const textarea = document.createElement('textarea');
+	textarea.value = text;
+	textarea.setAttribute('readonly', '');
+	textarea.style.position = 'fixed';
+	textarea.style.left = '-9999px';
+	textarea.style.top = '0';
+
+	document.body.appendChild(textarea);
+	textarea.focus();
+	textarea.select();
+
+	try {
+		return document.execCommand('copy');
+	} finally {
+		document.body.removeChild(textarea);
+	}
+};
+
+const copyText = async (text: string) => {
+	if (navigator.clipboard?.writeText) {
+		try {
+			await navigator.clipboard.writeText(text);
+			return true;
+		} catch {
+			return copyTextFallback(text);
+		}
+	}
+
+	return copyTextFallback(text);
+};
+
 export default function TokenSection({ connectedWorkerIDs, socket, workerTokens }: Props) {
 	const [workerID, setWorkerID] = useState('');
 	const [message, setMessage] = useState('');
@@ -111,15 +143,10 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 
 	const copySecret = () => {
 		if (!secret) return;
-		if (!navigator.clipboard) {
-			setCopyMessage('Copy unavailable.');
-			return;
-		}
 
-		navigator.clipboard
-			.writeText(secret.token)
-			.then(() => {
-				setCopyMessage('Copied.');
+		copyText(secret.token)
+			.then((copied) => {
+				setCopyMessage(copied ? 'Copied.' : 'Copy failed.');
 			})
 			.catch(() => {
 				setCopyMessage('Copy failed.');
@@ -206,7 +233,8 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 						<div className={styles['secret-worker']}>{secret.workerID}</div>
 						<code className={styles['secret-token']}>{secret.token}</code>
 						<div className={styles['overlay-message']}>
-							This token is shown once. Store it in the worker's WORKER_TOKEN value.
+							This token is shown once. Save it as the worker's WORKER_TOKEN environment
+							variable.
 						</div>
 						{copyMessage && <div className={styles['message']}>{copyMessage}</div>}
 						<div className={styles['overlay-actions']}>
