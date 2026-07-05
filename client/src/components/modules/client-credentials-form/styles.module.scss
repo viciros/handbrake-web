@@ -1,3 +1,5 @@
+@use '~styles/variables/breakpoints';
+
 .client-credentials-form {
 	display: flex;
 	flex-flow: column nowrap;
@@ -9,6 +11,10 @@
 		gap: 0.75rem;
 	}
 
+	.field {
+		min-width: 0;
+	}
+
 	.message {
 		color: var(--text-tertiary);
 		font-size: 0.9rem;
@@ -17,5 +23,24 @@
 	.buttons {
 		display: flex;
 		justify-content: flex-end;
+	}
+}
+
+@media (min-width: breakpoints.$breakpoint-medium) {
+	.client-credentials-form {
+		.field {
+			display: grid;
+			grid-template-columns: 9.5rem minmax(0, 1fr);
+			align-items: center;
+			column-gap: 0.75rem;
+
+			label {
+				white-space: nowrap;
+			}
+
+			input {
+				min-width: 0;
+			}
+		}
 	}
 }

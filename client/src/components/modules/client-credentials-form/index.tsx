@@ -10,6 +10,7 @@ import styles from './styles.module.scss';
 
 type Properties = {
 	currentUsername: string;
+	currentPasswordRequired?: boolean;
 	submitLabel?: string;
 	onSubmit: (
 		data: UpdateClientCredentialsType,
@@ -19,6 +20,7 @@ type Properties = {
 
 export default function ClientCredentialsForm({
 	currentUsername,
+	currentPasswordRequired = true,
 	submitLabel = 'Save Credentials',
 	onSubmit,
 }: Properties) {
@@ -32,7 +34,7 @@ export default function ClientCredentialsForm({
 	const trimmedUsername = username.trim();
 	const passwordsMatch = newPassword == confirmPassword;
 	const canSubmit =
-		currentPassword.length > 0 &&
+		(!currentPasswordRequired || currentPassword.length > 0) &&
 		trimmedUsername.length > 0 &&
 		newPassword.length >= 12 &&
 		passwordsMatch &&
@@ -41,14 +43,18 @@ export default function ClientCredentialsForm({
 	const handleSubmit = () => {
 		if (!canSubmit) return;
 
+		const credentials: UpdateClientCredentialsType = {
+			username: trimmedUsername,
+			new_password: newPassword,
+		};
+		if (currentPasswordRequired) {
+			credentials.current_password = currentPassword;
+		}
+
 		setMessage('');
 		setIsSaving(true);
 		onSubmit(
-			{
-				current_password: currentPassword,
-				username: trimmedUsername,
-				new_password: newPassword,
-			},
+			credentials,
 			(result) => {
 				setIsSaving(false);
 				setMessage(result.message || (result.ok ? 'Credentials updated.' : 'Update failed.'));
@@ -65,15 +71,19 @@ export default function ClientCredentialsForm({
 	return (
 		<div className={styles['client-credentials-form']}>
 			<div className={styles['fields']}>
+				{currentPasswordRequired && (
+					<TextInput
+						className={styles['field']}
+						id='current-password'
+						label='Current Password'
+						type='password'
+						autoComplete='current-password'
+						value={currentPassword}
+						onChange={(event) => setCurrentPassword(event.target.value)}
+					/>
+				)}
 				<TextInput
-					id='current-password'
-					label='Current Password'
-					type='password'
-					autoComplete='current-password'
-					value={currentPassword}
-					onChange={(event) => setCurrentPassword(event.target.value)}
-				/>
-				<TextInput
+					className={styles['field']}
 					id='new-username'
 					label='Username'
 					autoComplete='username'
@@ -81,6 +91,7 @@ export default function ClientCredentialsForm({
 					onChange={(event) => setUsername(event.target.value)}
 				/>
 				<TextInput
+					className={styles['field']}
 					id='new-password'
 					label='New Password'
 					type='password'
@@ -89,6 +100,7 @@ export default function ClientCredentialsForm({
 					onChange={(event) => setNewPassword(event.target.value)}
 				/>
 				<TextInput
+					className={styles['field']}
 					id='confirm-password'
 					label='Confirm Password'
 					type='password'

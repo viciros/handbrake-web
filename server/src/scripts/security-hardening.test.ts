@@ -63,7 +63,6 @@ test('initializes generated client auth credentials', async () => {
 	);
 
 	const updateResult = await UpdateClientAuthCredentials({
-		current_password: result.generatedPassword,
 		username: 'admin',
 		new_password: 'changed-password-value',
 	});
@@ -71,6 +70,14 @@ test('initializes generated client auth credentials', async () => {
 	assert.equal(updateResult.ok, true);
 	assert.equal(updateResult.status?.username, 'admin');
 	assert.equal(updateResult.status?.must_change_credentials, false);
+
+	const secondUpdateResult = await UpdateClientAuthCredentials({
+		username: 'admin',
+		new_password: 'second-changed-password-value',
+	});
+
+	assert.equal(secondUpdateResult.ok, false);
+	assert.match(String(secondUpdateResult.message), /Current password/);
 });
 
 test('validates signed client auth session tokens', async () => {

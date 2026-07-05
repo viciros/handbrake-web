@@ -4,7 +4,7 @@ export type ClientAuthStatusType = {
 };
 
 export type UpdateClientCredentialsType = {
-	current_password: string;
+	current_password?: string;
 	username: string;
 	new_password: string;
 };

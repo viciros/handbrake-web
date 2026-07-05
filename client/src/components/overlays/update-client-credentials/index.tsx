@@ -14,6 +14,7 @@ export default function UpdateClientCredentials() {
 				<h1>Change Credentials</h1>
 				<ClientCredentialsForm
 					currentUsername={authStatus.username}
+					currentPasswordRequired={false}
 					submitLabel='Update Credentials'
 					onSubmit={(data, callback) => {
 						socket.emit(

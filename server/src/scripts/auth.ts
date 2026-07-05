@@ -53,6 +53,7 @@ const scryptParallelization = 1;
 const scryptKeyLength = 64;
 
 let clientAuthCredentials: ClientAuthType | undefined;
+let clientAuthCredentialsUpdateInProgress = false;
 
 type RateLimitRecord = {
 	count: number;
@@ -418,41 +419,52 @@ export async function InitializeClientAuth() {
 export async function UpdateClientAuthCredentials(
 	data: UpdateClientCredentialsType
 ): Promise<UpdateClientCredentialsResultType> {
-	const currentCredentials = requireLoadedClientAuthCredentials();
-	const currentPassword = String(data.current_password ?? '');
-	const username = String(data.username ?? '').trim();
-	const newPassword = String(data.new_password ?? '');
-
-	if (
-		!(await VerifyClientPasswordHash(currentPassword, currentCredentials.password_hash))
-	) {
-		return { ok: false, message: 'Current password is incorrect.' };
+	if (clientAuthCredentialsUpdateInProgress) {
+		return { ok: false, message: 'Credentials update already in progress.' };
 	}
 
-	const validationError = validateNewClientCredentials(username, newPassword);
-	if (validationError) {
-		return { ok: false, message: validationError };
+	clientAuthCredentialsUpdateInProgress = true;
+	try {
+		const currentCredentials = requireLoadedClientAuthCredentials();
+		const currentPassword = String(data.current_password ?? '');
+		const username = String(data.username ?? '').trim();
+		const newPassword = String(data.new_password ?? '');
+		const currentPasswordRequired = !currentCredentials.must_change_credentials;
+
+		if (
+			currentPasswordRequired &&
+			!(await VerifyClientPasswordHash(currentPassword, currentCredentials.password_hash))
+		) {
+			return { ok: false, message: 'Current password is incorrect.' };
+		}
+
+		const validationError = validateNewClientCredentials(username, newPassword);
+		if (validationError) {
+			return { ok: false, message: validationError };
+		}
+
+		const now = Date.now();
+		const updatedCredentials = await DatabaseUpdateClientAuth({
+			username,
+			password_hash: await HashClientPassword(newPassword),
+			must_change_credentials: false,
+			updated_at: now,
+		});
+		if (!updatedCredentials) {
+			return { ok: false, message: 'Could not update credentials.' };
+		}
+
+		clientAuthCredentials = updatedCredentials;
+
+		return {
+			ok: true,
+			message: 'Credentials updated.',
+			status: GetClientAuthStatus(),
+			requires_reauth: true,
+		};
+	} finally {
+		clientAuthCredentialsUpdateInProgress = false;
 	}
-
-	const now = Date.now();
-	const updatedCredentials = await DatabaseUpdateClientAuth({
-		username,
-		password_hash: await HashClientPassword(newPassword),
-		must_change_credentials: false,
-		updated_at: now,
-	});
-	if (!updatedCredentials) {
-		return { ok: false, message: 'Could not update credentials.' };
-	}
-
-	clientAuthCredentials = updatedCredentials;
-
-	return {
-		ok: true,
-		message: 'Credentials updated.',
-		status: GetClientAuthStatus(),
-		requires_reauth: true,
-	};
 }
 
 export function IsValidWorkerID(workerID: string) {

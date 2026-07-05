@@ -130,6 +130,7 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 		<Section className={styles['token-section']} heading='Worker Tokens'>
 			<div className={styles['create-token']}>
 				<TextInput
+					className={styles['worker-id-input']}
 					label='Worker ID'
 					placeholder='worker-1'
 					value={workerID}
