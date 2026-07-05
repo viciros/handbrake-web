@@ -62,6 +62,25 @@ test('initializes generated client auth credentials', async () => {
 		true
 	);
 
+	const rotatedResult = await InitializeClientAuth();
+	const rotatedCredentials = await DatabaseGetClientAuth();
+
+	assert.ok(rotatedResult.generatedPassword);
+	assert.notEqual(rotatedResult.generatedPassword, result.generatedPassword);
+	assert.ok(rotatedCredentials);
+	assert.equal(rotatedCredentials.password_hash.includes(rotatedResult.generatedPassword), false);
+	assert.equal(
+		await VerifyClientPasswordHash(result.generatedPassword, rotatedCredentials.password_hash),
+		false
+	);
+	assert.equal(
+		await VerifyClientPasswordHash(
+			rotatedResult.generatedPassword,
+			rotatedCredentials.password_hash
+		),
+		true
+	);
+
 	const updateResult = await UpdateClientAuthCredentials({
 		username: 'admin',
 		new_password: 'changed-password-value',

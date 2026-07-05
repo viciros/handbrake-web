@@ -104,7 +104,7 @@ See [here](https://github.com/viciros/handbrake-web/wiki/about-volume-mapping) f
 
 #### `environment` Variables
 
-On the first successful server start, HandBrake Web logs a generated web UI password for the default username `admin`. Sign in with those credentials, then change the password when prompted. You can also change the username. The password is stored only as a salted hash in the server database.
+On each server start until the web UI credentials are changed, HandBrake Web logs a generated temporary password for the default username `admin`. If the server restarts before you change it, a new temporary password is generated and the previous one stops working. Sign in with the latest credentials, then change the password when prompted. You can also change the username. The password is stored only as a salted hash in the server database.
 
 After signing in, create a worker token on the Workers page. The token is shown once. Copy it into the worker's `WORKER_TOKEN` environment variable before starting that worker.
 

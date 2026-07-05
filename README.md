@@ -90,7 +90,7 @@ services:
       - handbrake-server
 ```
 
-On the first successful server start, HandBrake Web logs a generated web UI password for the default username `admin`. Sign in with those credentials, then change the password when prompted. You can also change the username. The password is stored only as a salted hash in the server database.
+On each server start until the web UI credentials are changed, HandBrake Web logs a generated temporary password for the default username `admin`. If the server restarts before you change it, a new temporary password is generated and the previous one stops working. Sign in with the latest credentials, then change the password when prompted. You can also change the username. The password is stored only as a salted hash in the server database.
 
 Create a token for each worker on the Workers page, then put the one-time token value into that worker's `WORKER_TOKEN` environment variable. Set the worker's `SERVER_URL` to the full server URL, including the scheme and any non-default port. For remote workers outside a trusted local network, expose the server over HTTPS/TLS and use an `https://` URL.
 

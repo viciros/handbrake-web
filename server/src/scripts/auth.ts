@@ -275,11 +275,23 @@ export const VerifyClientPasswordHash = VerifySecretHash;
 
 const generateClientAuthPassword = () => randomBytes(24).toString('base64url');
 
-const logGeneratedClientAuthCredentials = (password: string) => {
-	logger.warn('[auth] Created initial web UI credentials.');
-	logger.warn(`[auth] Username: ${defaultClientAuthUsername}`);
+const logGeneratedClientAuthCredentials = (
+	username: string,
+	password: string,
+	replacedExistingPassword = false
+) => {
+	logger.warn(
+		replacedExistingPassword
+			? '[auth] Replaced temporary web UI credentials because the password has not been changed.'
+			: '[auth] Created initial web UI credentials.'
+	);
+	logger.warn(`[auth] Username: ${username}`);
 	logger.warn(`[auth] Password: ${password}`);
-	logger.warn('[auth] Change the password in the web UI after signing in.');
+	logger.warn(
+		replacedExistingPassword
+			? '[auth] Only the latest generated password works. Change the password in the web UI after signing in.'
+			: '[auth] Change the password in the web UI after signing in.'
+	);
 };
 
 const validateNewClientCredentials = (
@@ -393,8 +405,25 @@ export function GetClientAuthStatus(): ClientAuthStatusType {
 export async function InitializeClientAuth() {
 	const existingCredentials = await DatabaseGetClientAuth();
 	if (existingCredentials) {
-		clientAuthCredentials = existingCredentials;
-		return { status: GetClientAuthStatus() };
+		if (!existingCredentials.must_change_credentials) {
+			clientAuthCredentials = existingCredentials;
+			return { status: GetClientAuthStatus() };
+		}
+
+		const generatedPassword = generateClientAuthPassword();
+		const credentials = await DatabaseUpdateClientAuth({
+			password_hash: await HashClientPassword(generatedPassword),
+			must_change_credentials: true,
+			updated_at: Date.now(),
+		});
+		if (!credentials) {
+			throw new Error('Could not update temporary client auth credentials.');
+		}
+
+		clientAuthCredentials = credentials;
+		logGeneratedClientAuthCredentials(credentials.username, generatedPassword, true);
+
+		return { generatedPassword, status: GetClientAuthStatus() };
 	}
 
 	const now = Date.now();
@@ -411,7 +440,7 @@ export async function InitializeClientAuth() {
 	}
 
 	clientAuthCredentials = credentials;
-	logGeneratedClientAuthCredentials(generatedPassword);
+	logGeneratedClientAuthCredentials(credentials.username, generatedPassword);
 
 	return { generatedPassword, status: GetClientAuthStatus() };
 }
