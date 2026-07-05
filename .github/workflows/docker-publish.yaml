@@ -263,10 +263,10 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=raw,value=${{ steps.app-version.outputs.version }},enable=${{ github.event_name == 'release' }}
+            type=raw,value=${{ steps.app-version.outputs.version }},enable=${{ github.event_name == 'release' || github.ref_type == 'tag' }}
             type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-            type=semver,pattern={{version}},enable=${{ github.event_name == 'release' }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{version}},enable=${{ github.event_name == 'release' || github.ref_type == 'tag' }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name == 'release' || github.ref_type == 'tag' }}
 
       - name: Build and push Docker image
         id: push
