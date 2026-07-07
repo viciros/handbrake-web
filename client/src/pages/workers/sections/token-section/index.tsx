@@ -195,15 +195,7 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 							</div>
 							<div className={styles['dates']}>
 								<div>
-									<span>Created</span>
-									<strong>{formatTimestamp(record.created_at)}</strong>
-								</div>
-								<div>
-									<span>Rotated</span>
-									<strong>{formatTimestamp(record.updated_at)}</strong>
-								</div>
-								<div>
-									<span>Last Used</span>
+									<span>Last Online</span>
 									<strong>{formatTimestamp(record.last_used_at)}</strong>
 								</div>
 							</div>
