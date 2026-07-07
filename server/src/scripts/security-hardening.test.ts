@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { randomBytes } from 'node:crypto';
-import { mkdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, symlink, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -259,6 +259,27 @@ test('stops output streams larger than the input size', async () => {
 		pipeline(Readable.from([Buffer.alloc(4), Buffer.alloc(4)]), new ByteLimitTransform(7), sink),
 		UploadTooLargeError
 	);
+});
+
+test('returns newest matching worker log and removes all job logs', async () => {
+	const { GetJobLogByID, RemoveJobLogByID, logPath } = await import('./logging');
+	const jobID = 987654;
+	const olderLogPath = path.join(logPath, `worker-old-job-${jobID}.log`);
+	const newerLogPath = path.join(logPath, `worker-new-job-${jobID}.log`);
+	const olderTime = new Date(Date.now() - 10_000);
+	const newerTime = new Date();
+
+	await mkdir(logPath, { recursive: true });
+	await writeFile(olderLogPath, 'old log');
+	await writeFile(newerLogPath, 'new log');
+	await utimes(olderLogPath, olderTime, olderTime);
+	await utimes(newerLogPath, newerTime, newerTime);
+
+	assert.equal(await GetJobLogByID(jobID), newerLogPath);
+
+	await RemoveJobLogByID(jobID);
+
+	assert.equal(await GetJobLogByID(jobID), undefined);
 });
 
 test('rejects browser-root symlink escapes', async (t) => {

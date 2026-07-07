@@ -149,13 +149,13 @@ const writePresetToFile = async (
 	}
 };
 
-const logAndSendJobLog = (jobLogger: ReturnType<typeof CreateFileLogger>, socket: Socket) => {
+const logAndSendJobLog = async (jobLogger: ReturnType<typeof CreateFileLogger>) => {
 	const transport = (jobLogger.transports as CustomTransportType[]).find(
 		(transport) => transport._dest != undefined
 	);
 	if (transport && transport.dirname && transport.filename) {
 		const logPath = path.join(transport.dirname, transport.filename);
-		SendLogToServer(logPath, socket);
+		await SendLogToServer(logPath, serverBaseAddress);
 	}
 
 	jobLogger.destroy();
@@ -790,7 +790,7 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 			} finally {
 				handbrake = null;
 				startingJobID = null;
-				logAndSendJobLog(jobLogger!, socket);
+				await logAndSendJobLog(jobLogger!);
 			}
 		});
 	} catch (err) {

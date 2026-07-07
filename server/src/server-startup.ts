@@ -12,6 +12,7 @@ import { DatabaseConnect } from 'scripts/database/database';
 import { LoadDefaultPresets, LoadPresets } from 'scripts/presets';
 import { InitializeQueue } from 'scripts/queue';
 import { CheckForVersionUpdate } from 'scripts/version';
+import { RegisterWorkerLogRoutes } from 'scripts/worker-logs';
 import { RegisterWorkerTransferRoutes } from 'scripts/worker-transfers';
 import { InitializeWatchers } from 'scripts/watcher';
 import ClientSocket from 'socket/client-socket';
@@ -62,6 +63,7 @@ export default async function ServerStartup() {
 	app.use(cors(corsOptions));
 
 	// Routes ------------------------------------------------------------------------------
+	RegisterWorkerLogRoutes(app);
 	RegisterWorkerTransferRoutes(app);
 	ClientRoutes(app);
 

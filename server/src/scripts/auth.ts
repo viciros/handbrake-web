@@ -111,6 +111,7 @@ const createRateLimiter = (maxAttempts: number, windowMs: number) => {
 const httpAuthFailures = createRateLimiter(30, 5 * 60 * 1000);
 const clientSocketAuthFailures = createRateLimiter(20, 5 * 60 * 1000);
 const workerSocketAuthFailures = createRateLimiter(60, 5 * 60 * 1000);
+const workerHttpAuthFailures = createRateLimiter(60, 5 * 60 * 1000);
 
 const getRequestRateLimitKey = (req: Request) => req.socket.remoteAddress || req.ip || 'unknown';
 const getSocketRateLimitKey = (socket: Socket) =>
@@ -140,6 +141,12 @@ const parseBasicAuth = (header: string | undefined): Credentials | undefined => 
 	} catch {
 		return undefined;
 	}
+};
+
+const parseBearerAuth = (header: string | undefined) => {
+	const match = header?.match(/^Bearer\s+(.+)$/i);
+
+	return match?.[1];
 };
 
 const parseCookieHeader = (header: string | undefined) => {
@@ -672,6 +679,66 @@ export async function RequireHttpAuth(req: Request, res: Response, next: NextFun
 	httpAuthFailures.recordFailure(rateLimitKey);
 	res.setHeader('WWW-Authenticate', 'Basic realm="HandBrake Web"');
 	res.status(401).send('Authentication required.');
+}
+
+export async function RequireWorkerHttpAuth(req: Request, res: Response, next: NextFunction) {
+	const rateLimitKey = getRequestRateLimitKey(req);
+	if (workerHttpAuthFailures.isLimited(rateLimitKey)) {
+		res.status(429).send('Too many authentication attempts.');
+		return;
+	}
+
+	const workerID = req.header('x-worker-id');
+	const token = parseBearerAuth(req.header('authorization'));
+
+	if (!workerID || !IsValidWorkerID(workerID)) {
+		workerHttpAuthFailures.recordFailure(rateLimitKey);
+		logger.warn('[auth] Rejected worker HTTP request with invalid worker ID.');
+		res.status(401).send('Authentication required.');
+		return;
+	}
+
+	if (!token) {
+		workerHttpAuthFailures.recordFailure(rateLimitKey);
+		logger.warn(`[auth] Rejected worker HTTP request from '${workerID}' with missing token.`);
+		res.status(401).send('Authentication required.');
+		return;
+	}
+
+	try {
+		const tokenRecord = await DatabaseGetWorkerAuthToken(workerID);
+		if (!tokenRecord) {
+			workerHttpAuthFailures.recordFailure(rateLimitKey);
+			logger.warn(`[auth] Rejected worker HTTP request from '${workerID}' with invalid token.`);
+			res.status(401).send('Authentication required.');
+			return;
+		}
+
+		const isAuthenticated = await VerifySecretHash(token, tokenRecord.token_hash);
+		if (!isAuthenticated) {
+			workerHttpAuthFailures.recordFailure(rateLimitKey);
+			logger.warn(`[auth] Rejected worker HTTP request from '${workerID}' with invalid token.`);
+			res.status(401).send('Authentication required.');
+			return;
+		}
+
+		if (!tokenRecord.is_enabled) {
+			workerHttpAuthFailures.recordFailure(rateLimitKey);
+			logger.warn(`[auth] Rejected worker HTTP request from '${workerID}' with disabled token.`);
+			res.status(401).send('Authentication required.');
+			return;
+		}
+
+		workerHttpAuthFailures.reset(rateLimitKey);
+		await DatabaseUpdateWorkerAuthToken(workerID, { last_used_at: Date.now() });
+		EmitToAllClients('worker-auth-tokens-update', await GetWorkerAuthTokenRecords());
+		res.locals.workerID = workerID;
+		next();
+	} catch (err) {
+		logger.error(`[auth] [error] Could not authenticate worker HTTP request.`);
+		logger.error(err);
+		res.status(500).send('Could not authenticate worker request.');
+	}
 }
 
 export function AuthenticateClientSocket(socket: Socket, next: (err?: ExtendedError) => void) {
