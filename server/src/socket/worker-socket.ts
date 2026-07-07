@@ -1,3 +1,4 @@
+import { FormatLogError } from '@handbrake-web/shared/logger';
 import type { UpdateJobStatusType } from '@handbrake-web/shared/types/database';
 import { type HandbrakePresetType } from '@handbrake-web/shared/types/preset';
 import { QueueStatus } from '@handbrake-web/shared/types/queue';
@@ -219,15 +220,19 @@ export default function WorkerSocket(io: Server) {
 					return;
 				}
 
+				let lease: WorkerTransferLease;
 				try {
-					callback(await CreateWorkerTransferLease(workerID, jobID, purpose));
+					lease = await CreateWorkerTransferLease(workerID, jobID, purpose);
 				} catch (err) {
 					logger.error(
 						`[socket] [error] Could not create '${purpose}' transfer lease for job '${jobID}'.`
 					);
-					logger.error(err);
+					logger.error(FormatLogError(err));
 					callback(undefined);
+					return;
 				}
+
+				callback(lease);
 			}
 		);
 

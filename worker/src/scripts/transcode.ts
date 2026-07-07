@@ -57,6 +57,10 @@ let presetPath: string | undefined;
 const cancelledJobIDs = new Set<number>();
 
 type ProgressPhase = 'scanning' | 'processing' | 'muxing';
+type ParsedHandBrakeOutput = {
+	kind: string | undefined;
+	rawJSON: string;
+};
 
 const displayedProgressScale = 10_000;
 const processCloseTimeoutMs = 15000;
@@ -192,6 +196,31 @@ const getLocalJobPaths = (job: WorkerJobData, workspaceDir: string) => ({
 	inputPath: path.join(workspaceDir, `input${path.extname(job.input_name) || '.media'}`),
 	outputPath: path.join(workspaceDir, `output${path.extname(job.output_name) || '.mkv'}`),
 });
+
+const trimStdoutBuffer = (value: string) =>
+	value.length > 100000 ? value.slice(-10000) : value;
+
+const extractHandBrakeOutputs = (stdoutBuffer: string) => {
+	const outputs: ParsedHandBrakeOutput[] = [];
+	const jsonRegex = /(^[A-Z][a-z]+):\s({(?:[\n\s+].+\n)+^})/gm;
+	let match: RegExpExecArray | null;
+	let lastIndex = 0;
+
+	while ((match = jsonRegex.exec(stdoutBuffer)) != null) {
+		lastIndex = jsonRegex.lastIndex;
+		outputs.push({
+			kind: match[1],
+			rawJSON: match[2]!,
+		});
+	}
+
+	return {
+		outputs,
+		remainingBuffer: trimStdoutBuffer(
+			lastIndex > 0 ? stdoutBuffer.slice(lastIndex) : stdoutBuffer
+		),
+	};
+};
 
 const getTransferURL = (lease: WorkerTransferLease) =>
 	new URL(lease.path, serverBaseAddress).toString();
@@ -501,6 +530,7 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 	let jobLogger: ReturnType<typeof CreateFileLogger> | undefined;
 	let terminalEventSent = false;
 	let stdoutBuffer = '';
+	let stdoutProcessingPromise: Promise<void> = Promise.resolve();
 	let terminalWorkPromise: Promise<void> | undefined;
 
 	try {
@@ -558,75 +588,89 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 		};
 		socket.emit('transcode-update', jobID, newStatus);
 
-		handbrake.stdout.on('data', (data) => {
-			void (async () => {
-				stdoutBuffer += data.toString();
-				const jsonRegex = /(^[A-Z][a-z]+):\s({(?:[\n\s+].+\n)+^})/gm;
-				let match: RegExpExecArray | null;
-				let lastIndex = 0;
+		const processStdoutBuffer = async () => {
+			const extracted = extractHandBrakeOutputs(stdoutBuffer);
+			stdoutBuffer = extracted.remainingBuffer;
 
-				while ((match = jsonRegex.exec(stdoutBuffer)) != null) {
-					lastIndex = jsonRegex.lastIndex;
+			for (const output of extracted.outputs) {
+				let outputJSON: HandbrakeOutputType;
+				try {
+					outputJSON = JSON.parse(output.rawJSON) as HandbrakeOutputType;
+				} catch (err) {
+					jobLogger!.error(
+						`[transcode] [error] Could not parse HandBrake JSON output for job '${jobID}'.`
+					);
+					jobLogger!.error(FormatLogError(err));
+					terminalEventSent = true;
+					await cleanupTranscodeFiles();
+					clearCurrentJobState();
+					if (!cancelledJobIDs.has(jobID)) {
+						socket.emit('transcode-error', jobID);
+					}
+					continue;
+				}
 
-					let outputJSON: HandbrakeOutputType;
-					try {
-						outputJSON = JSON.parse(match[2]!) as HandbrakeOutputType;
-					} catch (err) {
-						jobLogger!.error(
-							`[transcode] [error] Could not parse HandBrake JSON output for job '${jobID}'.`
+				try {
+					const isWorkDoneOutput =
+						output.kind == 'Progress' && outputJSON.State == 'WORKDONE';
+					if (isWorkDoneOutput && terminalEventSent) {
+						jobLogger!.warn(
+							`[transcode] [warn] Ignoring duplicate WORKDONE output for job '${jobID}'.`
 						);
-						jobLogger!.error(FormatLogError(err));
-						terminalEventSent = true;
-						await cleanupTranscodeFiles();
-						clearCurrentJobState();
-						if (!cancelledJobIDs.has(jobID)) {
-							socket.emit('transcode-error', jobID);
-						}
 						continue;
 					}
 
-					try {
-						const workPromise = handleProgressOutput(
-							jobID,
-							match[1],
-							outputJSON,
-							socket,
-							jobLogger!,
-							normalizeProgress,
-							() => {
-								terminalEventSent = true;
-							}
-						);
-
-						if (match[1] == 'Progress' && outputJSON.State == 'WORKDONE') {
-							terminalWorkPromise = workPromise;
+					const workPromise = handleProgressOutput(
+						jobID,
+						output.kind,
+						outputJSON,
+						socket,
+						jobLogger!,
+						normalizeProgress,
+						() => {
+							terminalEventSent = true;
 						}
+					);
 
-						await workPromise;
-					} catch (err) {
-						const outputDescription =
-							match[1] == 'Progress' && outputJSON.State == 'WORKDONE'
-								? 'post-encode output handling'
-								: `HandBrake ${match[1] ?? 'unknown'} output`;
-						jobLogger!.error(
-							`[transcode] [error] Could not process ${outputDescription} for job '${jobID}'.`
-						);
-						jobLogger!.error(FormatLogError(err));
-						terminalEventSent = true;
-						await cleanupTranscodeFiles();
-						clearCurrentJobState();
-						if (!cancelledJobIDs.has(jobID)) {
-							socket.emit('transcode-error', jobID);
-						}
+					if (isWorkDoneOutput) {
+						terminalWorkPromise = workPromise;
+					}
+
+					await workPromise;
+				} catch (err) {
+					const outputDescription =
+						output.kind == 'Progress' && outputJSON.State == 'WORKDONE'
+							? 'post-encode output handling'
+							: `HandBrake ${output.kind ?? 'unknown'} output`;
+					jobLogger!.error(
+						`[transcode] [error] Could not process ${outputDescription} for job '${jobID}'.`
+					);
+					jobLogger!.error(FormatLogError(err));
+					terminalEventSent = true;
+					await cleanupTranscodeFiles();
+					clearCurrentJobState();
+					if (!cancelledJobIDs.has(jobID)) {
+						socket.emit('transcode-error', jobID);
 					}
 				}
+			}
+		};
 
-				if (lastIndex > 0) {
-					stdoutBuffer = stdoutBuffer.slice(lastIndex);
-				} else if (stdoutBuffer.length > 100000) {
-					stdoutBuffer = stdoutBuffer.slice(-10000);
-				}
-			})();
+		const queueStdoutProcessing = () => {
+			stdoutProcessingPromise = stdoutProcessingPromise
+				.then(processStdoutBuffer)
+				.catch((err) => {
+					logger.error(
+						`[transcode] [error] Could not process queued HandBrake output for job '${jobID}'.`
+					);
+					logger.error(FormatLogError(err));
+				});
+			return stdoutProcessingPromise;
+		};
+
+		handbrake.stdout.on('data', (data) => {
+			stdoutBuffer += data.toString();
+			void queueStdoutProcessing();
 		});
 
 		handbrake.stderr.on('data', (data) => {
@@ -640,6 +684,8 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 
 		handbrake.on('close', async (code, signal) => {
 			try {
+				await stdoutProcessingPromise.catch(() => undefined);
+
 				if (terminalWorkPromise) {
 					await terminalWorkPromise.catch(() => undefined);
 				}
