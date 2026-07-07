@@ -75,15 +75,15 @@
 			}
 
 			.info {
-				display: flex;
-				flex-flow: row wrap;
+				width: 100%;
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
 				gap: 1rem;
 				min-width: 0;
 
 				#input,
 				#output {
-					flex: 1 1 18rem;
-					min-width: min(18rem, 100%);
+					min-width: 0;
 
 					.job-section-children {
 						overflow: visible;
@@ -93,19 +93,7 @@
 					}
 				}
 
-				#current-fps,
-				#average-fps {
-					width: 10%;
-				}
-
-				#time-elapsed,
-				#time-left {
-					width: 15%;
-				}
-
 				#progress {
-					flex: 1 1 16rem;
-					min-width: 50%;
 					width: auto;
 				}
 
