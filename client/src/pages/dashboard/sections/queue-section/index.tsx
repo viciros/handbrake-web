@@ -1,6 +1,6 @@
 import { statusSorting } from '@handbrake-web/shared/dict/queue.dict';
-import { QueueType } from '@handbrake-web/shared/types/queue';
-import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import type { QueueType } from '@handbrake-web/shared/types/queue';
+import { IsActiveTranscodeStage, TranscodeStage } from '@handbrake-web/shared/types/transcode';
 import BadgeInfo from '~components/base/info/badge-info';
 import ProgressBar from '~components/base/progress';
 import Section from '~components/root/section';
@@ -12,8 +12,24 @@ interface Properties {
 }
 
 export default function QueueSection({ queue }: Properties) {
-	const formatTime = (timeFinished: number) =>
+	const secondsToTime = (seconds: number) => {
+		const hours = Math.floor(seconds / 3600);
+		const minutes = Math.floor((seconds % 3600) / 60);
+		const newSeconds = Math.floor((seconds % 3600) % 60);
+		return [hours, minutes, newSeconds]
+			.map((value) => value.toString().padStart(2, '0'))
+			.join(':');
+	};
+
+	const formatFinishedTime = (timeFinished: number) =>
 		timeFinished ? new Date(timeFinished).toLocaleString() : 'N/A';
+
+	const formatJobTime = (job: QueueType[number]) =>
+		IsActiveTranscodeStage(job.transcode_stage)
+			? job.transcode_eta
+				? secondsToTime(job.transcode_eta)
+				: 'N/A'
+			: formatFinishedTime(job.time_finished);
 
 	return (
 		<Section className={styles['queue']} heading='Queue' link='/queue'>
@@ -98,7 +114,7 @@ export default function QueueSection({ queue }: Properties) {
 									>
 										{TranscodeStage[job.transcode_stage || 0]}
 									</td>
-									<td align='center'>{formatTime(job.time_finished)}</td>
+									<td align='center'>{formatJobTime(job)}</td>
 									<td className={styles['progress']}>
 										<ProgressBar
 											className={styles['percentage']}
