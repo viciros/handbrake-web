@@ -33,6 +33,16 @@ test('does not require worker auth env config', async () => {
 	assert.equal('ValidateAuthConfig' in auth, false);
 });
 
+test('formats unknown log errors without empty output', async () => {
+	const { FormatLogError } = await import('@handbrake-web/shared/logger');
+	const causedError = new Error('outer failure', { cause: new Error('inner failure') });
+
+	assert.match(FormatLogError(causedError), /outer failure/);
+	assert.match(FormatLogError(causedError), /inner failure/);
+	assert.equal(FormatLogError(undefined), 'undefined');
+	assert.match(FormatLogError({ value: undefined }), /"\[undefined\]"/);
+});
+
 test('hashes client auth passwords', async () => {
 	const { HashClientPassword, VerifyClientPasswordHash } = await import('./auth');
 	const password = 'correct horse battery staple';

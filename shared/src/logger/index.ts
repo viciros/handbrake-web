@@ -12,6 +12,48 @@ export const formatJSON = (json: string) => {
 	return json.replace(/"([^"]+)":/g, '$1:').replace(/:\s"([^"]+)"/g, ": '$1'");
 };
 
+const stringifyUnknownObject = (value: object) => {
+	const seen = new WeakSet<object>();
+
+	try {
+		return (
+			JSON.stringify(
+				value,
+				(_key, nestedValue) => {
+					if (typeof nestedValue == 'bigint') return nestedValue.toString();
+					if (typeof nestedValue == 'undefined') return '[undefined]';
+					if (typeof nestedValue == 'object' && nestedValue != null) {
+						if (seen.has(nestedValue)) return '[Circular]';
+						seen.add(nestedValue);
+					}
+
+					return nestedValue;
+				},
+				2
+			) ?? String(value)
+		);
+	} catch {
+		return String(value);
+	}
+};
+
+export const FormatLogError = (error: unknown): string => {
+	if (error instanceof Error) {
+		const errorText = error.stack || `${error.name}: ${error.message}`;
+		const cause = error.cause;
+
+		return cause == undefined
+			? errorText
+			: `${errorText}\nCaused by: ${FormatLogError(cause)}`;
+	}
+
+	if (typeof error == 'object' && error != null) {
+		return stringifyUnknownObject(error);
+	}
+
+	return String(error);
+};
+
 const formatInfo = format((info) => {
 	if (info.timestamp) {
 		info.timestamp = new Date(info.timestamp as string).toLocaleTimeString('en-US', {

@@ -10,6 +10,7 @@ import path from 'path';
 import { Transform, type TransformCallback } from 'stream';
 import { pipeline } from 'stream/promises';
 
+import { FormatLogError } from '@handbrake-web/shared/logger';
 import logger from 'logging';
 import {
 	DatabaseGetJobStatusByIDOrUndefined,
@@ -76,6 +77,18 @@ const deleteTransferLease = (token: string, lease: TransferLeaseRecord) => {
 const getTransferPath = (jobID: number, purpose: WorkerTransferPurpose) =>
 	`/worker/transfers/jobs/${jobID}/${purpose}`;
 
+const logTransferRejection = (
+	purpose: WorkerTransferPurpose,
+	jobID: number | string | undefined,
+	message: string
+) => {
+	logger.warn(
+		`[transfer] [warn] Rejecting '${purpose}' transfer${
+			jobID == undefined ? '' : ` for job '${jobID}'`
+		}: ${message}`
+	);
+};
+
 const getUploadTempPath = (outputPath: string, jobID: number) => {
 	const parsedOutput = path.parse(outputPath);
 	const nonce = randomBytes(8).toString('hex');
@@ -102,12 +115,14 @@ const getTransferJob = async (
 
 	const jobID = Number.parseInt(String(req.params.jobID), 10);
 	if (!Number.isInteger(jobID)) {
+		logTransferRejection(expectedPurpose, String(req.params.jobID), 'invalid job ID.');
 		res.status(400).send('Invalid job ID.');
 		return undefined;
 	}
 
 	const token = getBearerToken(req);
 	if (!token) {
+		logTransferRejection(expectedPurpose, jobID, 'missing transfer token.');
 		res.status(401).send('Missing transfer token.');
 		return undefined;
 	}
@@ -115,18 +130,29 @@ const getTransferJob = async (
 	const lease = transferLeases.get(token);
 
 	if (!lease || lease.expiresAt <= Date.now()) {
+		logTransferRejection(expectedPurpose, jobID, 'invalid or expired transfer token.');
 		res.status(401).send('Invalid transfer token.');
 		return undefined;
 	}
 	deleteTransferLease(token, lease);
 
 	if (lease.jobID != jobID || lease.purpose != expectedPurpose) {
+		logTransferRejection(
+			expectedPurpose,
+			jobID,
+			`token is for '${lease.purpose}' transfer on job '${lease.jobID}' from worker '${lease.workerID}'.`
+		);
 		res.status(403).send('Transfer token does not match this request.');
 		return undefined;
 	}
 
 	const status = await DatabaseGetJobStatusByIDOrUndefined(jobID);
 	if (!status || status.worker_id != lease.workerID) {
+		logTransferRejection(
+			expectedPurpose,
+			jobID,
+			`worker '${lease.workerID}' no longer owns this job; current owner is '${status?.worker_id ?? null}'.`
+		);
 		res.status(403).send('Worker no longer owns this job.');
 		return undefined;
 	}
@@ -252,7 +278,7 @@ export function RegisterWorkerTransferRoutes(app: Express) {
 			await pipeline(createReadStream(inputPath), res);
 		} catch (err) {
 			logger.error('[transfer] [error] Could not stream job input to worker.');
-			logger.error(err);
+			logger.error(FormatLogError(err));
 			if (!res.headersSent) {
 				res.status(500).send('Could not stream job input.');
 			}
@@ -265,13 +291,20 @@ export function RegisterWorkerTransferRoutes(app: Express) {
 
 		let tempOutputPath: string | undefined;
 		let jobID: number | undefined;
+		let workerID: string | undefined;
+		let configuredOutputPath: string | undefined;
 
 		try {
 			const transfer = await getTransferJob(req, res, 'output');
 			if (!transfer) return;
 			const { job, lease } = transfer;
 			jobID = job.job_id;
+			workerID = lease.workerID;
+			configuredOutputPath = job.output_path;
 			if (outputUploadsInProgress.has(job.job_id)) {
+				logger.warn(
+					`[transfer] [warn] Rejecting output upload for job '${job.job_id}' from worker '${lease.workerID}': an output upload is already in progress.`
+				);
 				res.status(409).send('An output upload is already in progress for this job.');
 				return;
 			}
@@ -280,15 +313,22 @@ export function RegisterWorkerTransferRoutes(app: Express) {
 			const inputPath = await AssertExistingPathInMediaRoots(job.input_path, 'job input');
 			const inputStats = await stat(inputPath);
 			if (!inputStats.isFile()) {
+				logger.warn(
+					`[transfer] [warn] Rejecting output upload for job '${job.job_id}' from worker '${lease.workerID}': input path '${inputPath}' is not a file.`
+				);
 				res.status(400).send('Job input is not a file.');
 				return;
 			}
 			const maxOutputUploadBytes = GetMaxOutputUploadBytes(inputStats.size);
+			const declaredContentLength = getRequestContentLength(req);
 			const contentLengthResult = ValidateOutputUploadContentLength(
-				getRequestContentLength(req),
+				declaredContentLength,
 				maxOutputUploadBytes
 			);
 			if (!contentLengthResult.ok) {
+				logger.warn(
+					`[transfer] [warn] Rejecting output upload for job '${job.job_id}' from worker '${lease.workerID}': ${contentLengthResult.message} Declared Content-Length: ${declaredContentLength}; max allowed bytes: ${maxOutputUploadBytes}; input bytes: ${inputStats.size}; output path: '${job.output_path}'.`
+				);
 				res.status(contentLengthResult.status).send(contentLengthResult.message);
 				return;
 			}
@@ -309,8 +349,10 @@ export function RegisterWorkerTransferRoutes(app: Express) {
 			tempOutputPath = undefined;
 			res.status(204).end();
 		} catch (err) {
-			logger.error('[transfer] [error] Could not receive job output from worker.');
-			logger.error(err);
+			logger.error(
+				`[transfer] [error] Could not receive job output from worker '${workerID ?? 'unknown'}' for job '${jobID ?? 'unknown'}'. Configured output path: '${configuredOutputPath ?? 'unknown'}'.`
+			);
+			logger.error(FormatLogError(err));
 
 			if (tempOutputPath) {
 				await rm(tempOutputPath, { force: true });

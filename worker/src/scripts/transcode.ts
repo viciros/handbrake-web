@@ -1,5 +1,6 @@
 import {
 	CreateFileLogger,
+	FormatLogError,
 	formatJSON,
 	type CustomTransportType,
 } from '@handbrake-web/shared/logger';
@@ -60,6 +61,7 @@ type ProgressPhase = 'scanning' | 'processing' | 'muxing';
 const displayedProgressScale = 10_000;
 const processCloseTimeoutMs = 15000;
 const transferProgressUpdateIntervalMs = 500;
+const responseBodyMaxLogLength = 1000;
 const getX265ThreadPoolOptions = () => [`pools=${availableParallelism()}`, 'wpp'];
 
 const createProgressNormalizer = () => {
@@ -152,7 +154,7 @@ const cleanupTranscodeFiles = async (workspaceDir = currentWorkspaceDir) => {
 		logger.info(`[transcode] Cleaned up workspace '${path.basename(workspaceDir)}'.`);
 	} catch (err) {
 		logger.warn(`[transcode] [warn] Could not remove workspace '${workspaceDir}'.`);
-		logger.warn(err);
+		logger.warn(FormatLogError(err));
 	}
 };
 
@@ -193,6 +195,20 @@ const getLocalJobPaths = (job: WorkerJobData, workspaceDir: string) => ({
 
 const getTransferURL = (lease: WorkerTransferLease) =>
 	new URL(lease.path, serverBaseAddress).toString();
+
+const truncateForLog = (value: string) =>
+	value.length > responseBodyMaxLogLength
+		? `${value.slice(0, responseBodyMaxLogLength)}... [truncated]`
+		: value;
+
+const getResponseBodyForLog = async (response: Response) => {
+	try {
+		const responseBody = (await response.text()).trim();
+		return responseBody ? truncateForLog(responseBody) : '<empty>';
+	} catch (err) {
+		return `<could not read response body: ${FormatLogError(err)}>`;
+	}
+};
 
 const requestTransferLease = async (
 	socket: Socket,
@@ -345,7 +361,9 @@ const uploadOutput = async (
 	activeTransferAbortController = new AbortController();
 
 	try {
-		jobLogger.info(`[transcode] Uploading output for job '${jobID}'.`);
+		jobLogger.info(
+			`[transcode] Uploading output for job '${jobID}' (${outputStats.size} bytes).`
+		);
 		const response = await fetch(getTransferURL(lease), {
 			method: 'PUT',
 			headers: {
@@ -360,7 +378,11 @@ const uploadOutput = async (
 		} as RequestInit & { duplex: 'half' });
 
 		if (!response.ok) {
-			throw new Error(`Output upload failed with status ${response.status}.`);
+			const statusText = response.statusText ? ` ${response.statusText}` : '';
+			const responseBody = await getResponseBodyForLog(response);
+			throw new Error(
+				`Output upload failed with HTTP ${response.status}${statusText}. Response body: ${responseBody}`
+			);
 		}
 
 		jobLogger.info(`[transcode] Finished uploading output for job '${jobID}'.`);
@@ -546,8 +568,24 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 				while ((match = jsonRegex.exec(stdoutBuffer)) != null) {
 					lastIndex = jsonRegex.lastIndex;
 
+					let outputJSON: HandbrakeOutputType;
 					try {
-						const outputJSON = JSON.parse(match[2]!) as HandbrakeOutputType;
+						outputJSON = JSON.parse(match[2]!) as HandbrakeOutputType;
+					} catch (err) {
+						jobLogger!.error(
+							`[transcode] [error] Could not parse HandBrake JSON output for job '${jobID}'.`
+						);
+						jobLogger!.error(FormatLogError(err));
+						terminalEventSent = true;
+						await cleanupTranscodeFiles();
+						clearCurrentJobState();
+						if (!cancelledJobIDs.has(jobID)) {
+							socket.emit('transcode-error', jobID);
+						}
+						continue;
+					}
+
+					try {
 						const workPromise = handleProgressOutput(
 							jobID,
 							match[1],
@@ -566,8 +604,14 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 
 						await workPromise;
 					} catch (err) {
-						jobLogger!.error('[transcode] [error] Could not parse/process HandBrake JSON.');
-						jobLogger!.error(err);
+						const outputDescription =
+							match[1] == 'Progress' && outputJSON.State == 'WORKDONE'
+								? 'post-encode output handling'
+								: `HandBrake ${match[1] ?? 'unknown'} output`;
+						jobLogger!.error(
+							`[transcode] [error] Could not process ${outputDescription} for job '${jobID}'.`
+						);
+						jobLogger!.error(FormatLogError(err));
 						terminalEventSent = true;
 						await cleanupTranscodeFiles();
 						clearCurrentJobState();
@@ -591,7 +635,7 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 
 		handbrake.on('error', (err) => {
 			jobLogger!.error(`[transcode] [error] The HandBrake child process failed.`);
-			jobLogger!.error(err);
+			jobLogger!.error(FormatLogError(err));
 		});
 
 		handbrake.on('close', async (code, signal) => {
@@ -620,9 +664,9 @@ const runTranscode = async (jobID: number, socket: Socket) => {
 		});
 	} catch (err) {
 		logger.error(`[transcode] [error] Could not run job '${jobID}'.`);
-		logger.error(err);
+		logger.error(FormatLogError(err));
 		jobLogger?.error(`[transcode] [error] Could not run job '${jobID}'.`);
-		jobLogger?.error(err);
+		jobLogger?.error(FormatLogError(err));
 		await cleanupTranscodeFiles();
 		clearCurrentJobState();
 		handbrake = null;
