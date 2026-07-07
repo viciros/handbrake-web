@@ -504,6 +504,7 @@ const generateWorkerToken = () => randomBytes(32).toString('base64url');
 
 const toWorkerAuthTokenRecord = (token: WorkerAuthTokenType): WorkerAuthTokenRecordType => ({
 	worker_id: token.worker_id,
+	is_enabled: token.is_enabled,
 	created_at: token.created_at,
 	updated_at: token.updated_at,
 	last_used_at: token.last_used_at,
@@ -612,6 +613,41 @@ export async function RevokeWorkerAuthToken(
 	};
 }
 
+export async function SetWorkerAuthTokenEnabled(
+	workerID: string,
+	isEnabled: boolean
+): Promise<WorkerAuthTokenActionResultType> {
+	const normalizedWorkerID = String(workerID ?? '').trim();
+	const validationError = validateWorkerIDForTokenAction(normalizedWorkerID);
+	if (validationError) return { ok: false, message: validationError };
+
+	const existingToken = await DatabaseGetWorkerAuthToken(normalizedWorkerID);
+	if (!existingToken) {
+		return { ok: false, message: 'No token exists for this worker.' };
+	}
+
+	const record = await DatabaseUpdateWorkerAuthToken(normalizedWorkerID, {
+		is_enabled: isEnabled,
+		updated_at: Date.now(),
+	});
+
+	if (!record) {
+		return {
+			ok: false,
+			message: `Could not ${isEnabled ? 'enable' : 'disable'} worker token.`,
+		};
+	}
+
+	if (!isEnabled) {
+		disconnectWorkerWithToken(normalizedWorkerID, 'disable');
+	}
+
+	return {
+		ok: true,
+		message: `Worker token ${isEnabled ? 'enabled' : 'disabled'}.`,
+	};
+}
+
 export async function RequireHttpAuth(req: Request, res: Response, next: NextFunction) {
 	const rateLimitKey = getRequestRateLimitKey(req);
 	if (httpAuthFailures.isLimited(rateLimitKey)) {
@@ -700,12 +736,25 @@ export function AuthenticateWorkerSocket(socket: Socket, next: (err?: ExtendedEr
 		}
 
 		const tokenRecord = await DatabaseGetWorkerAuthToken(workerID);
-		const isAuthenticated =
-			tokenRecord != undefined && (await VerifySecretHash(auth.token, tokenRecord.token_hash));
+		if (!tokenRecord) {
+			workerSocketAuthFailures.recordFailure(rateLimitKey);
+			logger.warn(`[socket] Rejected worker '${workerID}' with invalid token.`);
+			next(new Error('unauthorized'));
+			return;
+		}
+
+		const isAuthenticated = await VerifySecretHash(auth.token, tokenRecord.token_hash);
 
 		if (!isAuthenticated) {
 			workerSocketAuthFailures.recordFailure(rateLimitKey);
 			logger.warn(`[socket] Rejected worker '${workerID}' with invalid token.`);
+			next(new Error('unauthorized'));
+			return;
+		}
+
+		if (!tokenRecord.is_enabled) {
+			workerSocketAuthFailures.recordFailure(rateLimitKey);
+			logger.warn(`[socket] Rejected worker '${workerID}' with disabled token.`);
 			next(new Error('unauthorized'));
 			return;
 		}

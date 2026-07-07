@@ -149,6 +149,7 @@ test('creates, verifies, rotates, and revokes worker tokens', async () => {
 		CreateWorkerAuthToken,
 		RevokeWorkerAuthToken,
 		RotateWorkerAuthToken,
+		SetWorkerAuthTokenEnabled,
 		VerifySecretHash,
 	} = await import('./auth');
 	const { DatabaseGetWorkerAuthToken } = await import('./database/database-worker-auth');
@@ -160,10 +161,23 @@ test('creates, verifies, rotates, and revokes worker tokens', async () => {
 
 	const storedCreatedToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedCreatedToken);
+	assert.equal(storedCreatedToken.is_enabled, true);
 	assert.notEqual(storedCreatedToken.token_hash, created.token);
 	assert.equal(storedCreatedToken.token_hash.includes(created.token), false);
 	assert.equal(await VerifySecretHash(created.token, storedCreatedToken.token_hash), true);
 	assert.equal(await VerifySecretHash('wrong token', storedCreatedToken.token_hash), false);
+
+	const disabled = await SetWorkerAuthTokenEnabled(workerID, false);
+	assert.equal(disabled.ok, true);
+	const storedDisabledToken = await DatabaseGetWorkerAuthToken(workerID);
+	assert.ok(storedDisabledToken);
+	assert.equal(storedDisabledToken.is_enabled, false);
+
+	const enabled = await SetWorkerAuthTokenEnabled(workerID, true);
+	assert.equal(enabled.ok, true);
+	const storedEnabledToken = await DatabaseGetWorkerAuthToken(workerID);
+	assert.ok(storedEnabledToken);
+	assert.equal(storedEnabledToken.is_enabled, true);
 
 	const rotated = await RotateWorkerAuthToken(workerID);
 	assert.equal(rotated.ok, true);

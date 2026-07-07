@@ -5,7 +5,9 @@ import type {
 } from '@handbrake-web/shared/types/auth';
 import RotateIcon from '@icons/arrow-clockwise.svg?react';
 import ClipboardIcon from '@icons/clipboard.svg?react';
+import PlayIcon from '@icons/play-fill.svg?react';
 import PlusIcon from '@icons/plus-lg.svg?react';
+import StopIcon from '@icons/stop-fill.svg?react';
 import TrashIcon from '@icons/trash-fill.svg?react';
 import CloseIcon from '@icons/x-lg.svg?react';
 import { useMemo, useState } from 'react';
@@ -141,6 +143,33 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 		);
 	};
 
+	const setTokenEnabled = (record: WorkerAuthTokenRecordType, isEnabled: boolean) => {
+		if (
+			!isEnabled &&
+			connectedWorkers.has(record.worker_id) &&
+			!window.confirm(
+				`Disable the token for '${record.worker_id}'? This will disconnect the worker.`
+			)
+		) {
+			return;
+		}
+
+		setMessage('');
+		socket.emit(
+			'set-worker-auth-token-enabled',
+			record.worker_id,
+			isEnabled,
+			(result: WorkerAuthTokenActionResultType) => {
+				setMessage(
+					result.message ||
+						(result.ok
+							? `Worker token ${isEnabled ? 'enabled' : 'disabled'}.`
+							: 'Update failed.')
+				);
+			}
+		);
+	};
+
 	const copySecret = () => {
 		if (!secret) return;
 
@@ -184,13 +213,21 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 
 				{workerTokens.map((record) => {
 					const isOnline = connectedWorkers.has(record.worker_id);
+					const isEnabled = record.is_enabled;
 
 					return (
-						<div className={styles['token-row']} key={record.worker_id}>
+						<div
+							className={styles['token-row']}
+							data-enabled={isEnabled}
+							key={record.worker_id}
+						>
 							<div className={styles['identity']}>
 								<span className={styles['worker-id']}>{record.worker_id}</span>
 								<span className={styles['status']} data-online={isOnline}>
 									{isOnline ? 'Online' : 'Offline'}
+								</span>
+								<span className={styles['status']} data-enabled={isEnabled}>
+									{isEnabled ? 'Enabled' : 'Disabled'}
 								</span>
 							</div>
 							<div className={styles['dates']}>
@@ -200,6 +237,12 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 								</div>
 							</div>
 							<div className={styles['actions']}>
+								<ButtonInput
+									label={isEnabled ? 'Disable' : 'Enable'}
+									Icon={isEnabled ? StopIcon : PlayIcon}
+									color={isEnabled ? 'orange' : 'green'}
+									onClick={() => setTokenEnabled(record, !isEnabled)}
+								/>
 								<ButtonInput
 									label='Rotate'
 									Icon={RotateIcon}

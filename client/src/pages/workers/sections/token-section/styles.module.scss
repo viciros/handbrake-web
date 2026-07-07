@@ -36,6 +36,12 @@
 		&:last-child {
 			border-bottom: 0.1rem solid var(--transparent-primary);
 		}
+
+		&[data-enabled='false'] {
+			.worker-id {
+				color: var(--text-tertiary);
+			}
+		}
 	}
 
 	.identity {
@@ -59,6 +65,14 @@
 
 		&[data-online='true'] {
 			color: var(--handbrake-green);
+		}
+
+		&[data-enabled='true'] {
+			color: var(--handbrake-green);
+		}
+
+		&[data-enabled='false'] {
+			color: var(--handbrake-orange);
 		}
 	}
 
