@@ -74,6 +74,28 @@ const deleteTransferLease = (token: string, lease: TransferLeaseRecord) => {
 	}
 };
 
+const deleteUnusedOutputLeaseForRetry = (jobID: number, workerID: string) => {
+	const token = outputLeaseTokensByJob.get(jobID);
+	if (!token) return;
+
+	const lease = transferLeases.get(token);
+	if (!lease) {
+		outputLeaseTokensByJob.delete(jobID);
+		return;
+	}
+
+	if (lease.workerID != workerID) {
+		throw new Error(
+			`Job '${jobID}' already has an active output transfer lease for worker '${lease.workerID}'.`
+		);
+	}
+
+	deleteTransferLease(token, lease);
+	logger.warn(
+		`[transfer] [warn] Replaced unused output transfer lease for retry on job '${jobID}' from worker '${workerID}'.`
+	);
+};
+
 const getTransferPath = (jobID: number, purpose: WorkerTransferPurpose) =>
 	`/worker/transfers/jobs/${jobID}/${purpose}`;
 
@@ -214,9 +236,10 @@ export async function CreateWorkerTransferLease(
 		contentLength = (await stat(inputPath)).size;
 	} else {
 		await AssertOutputPathInMediaRoots(job.output_path, 'job output');
-		if (outputLeaseTokensByJob.has(jobID) || outputUploadsInProgress.has(jobID)) {
+		if (outputUploadsInProgress.has(jobID)) {
 			throw new Error(`Job '${jobID}' already has an active output transfer.`);
 		}
+		deleteUnusedOutputLeaseForRetry(jobID, workerID);
 	}
 
 	const token = randomBytes(32).toString('base64url');

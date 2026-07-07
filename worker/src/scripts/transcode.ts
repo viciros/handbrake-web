@@ -62,8 +62,19 @@ type ParsedHandBrakeOutput = {
 	rawJSON: string;
 };
 
+class OutputUploadHttpError extends Error {
+	constructor(
+		message: string,
+		readonly status: number
+	) {
+		super(message);
+	}
+}
+
 const displayedProgressScale = 10_000;
 const processCloseTimeoutMs = 15000;
+const outputUploadMaxAttempts = 3;
+const outputUploadRetryBaseDelayMs = 2000;
 const transferProgressUpdateIntervalMs = 500;
 const responseBodyMaxLogLength = 1000;
 const getX265ThreadPoolOptions = () => [`pools=${availableParallelism()}`, 'wpp'];
@@ -225,6 +236,8 @@ const extractHandBrakeOutputs = (stdoutBuffer: string) => {
 const getTransferURL = (lease: WorkerTransferLease) =>
 	new URL(lease.path, serverBaseAddress).toString();
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const truncateForLog = (value: string) =>
 	value.length > responseBodyMaxLogLength
 		? `${value.slice(0, responseBodyMaxLogLength)}... [truncated]`
@@ -253,6 +266,34 @@ const requestTransferLease = async (
 	}
 
 	return lease;
+};
+
+const hasCompletedOutputTransfer = async (socket: Socket, jobID: number) => {
+	try {
+		return (await socket
+			.timeout(5000)
+			.emitWithAck('has-completed-output-transfer', jobID)) as boolean;
+	} catch {
+		return false;
+	}
+};
+
+const shouldRetryOutputUpload = (err: unknown) => {
+	if (!(err instanceof OutputUploadHttpError)) return true;
+
+	return (
+		err.status == 408 ||
+		err.status == 409 ||
+		err.status == 425 ||
+		err.status == 429 ||
+		err.status >= 500
+	);
+};
+
+const throwIfJobCancelled = (jobID: number) => {
+	if (cancelledJobIDs.has(jobID)) {
+		throw new Error(`Output upload was cancelled for job '${jobID}'.`);
+	}
 };
 
 const getChunkByteLength = (chunk: unknown, encoding: BufferEncoding) => {
@@ -379,28 +420,29 @@ const downloadInput = async (
 	}
 };
 
-const uploadOutput = async (
+const uploadOutputOnce = async (
 	socket: Socket,
 	jobID: number,
 	sourcePath: string,
-	jobLogger: ReturnType<typeof CreateFileLogger>
+	jobLogger: ReturnType<typeof CreateFileLogger>,
+	attempt: number,
+	outputBytes: number
 ) => {
 	const lease = await requestTransferLease(socket, jobID, 'output');
-	const outputStats = await stat(sourcePath);
 	activeTransferAbortController = new AbortController();
 
 	try {
 		jobLogger.info(
-			`[transcode] Uploading output for job '${jobID}' (${outputStats.size} bytes).`
+			`[transcode] Uploading output for job '${jobID}' (${outputBytes} bytes), attempt ${attempt}/${outputUploadMaxAttempts}.`
 		);
 		const response = await fetch(getTransferURL(lease), {
 			method: 'PUT',
 			headers: {
 				Authorization: `Bearer ${lease.token}`,
-				'Content-Length': outputStats.size.toString(),
+				'Content-Length': outputBytes.toString(),
 			},
 			body: createReadStream(sourcePath).pipe(
-				createTransferProgressTransform(socket, jobID, outputStats.size)
+				createTransferProgressTransform(socket, jobID, outputBytes)
 			) as unknown as RequestInit['body'],
 			duplex: 'half',
 			signal: activeTransferAbortController.signal,
@@ -409,14 +451,57 @@ const uploadOutput = async (
 		if (!response.ok) {
 			const statusText = response.statusText ? ` ${response.statusText}` : '';
 			const responseBody = await getResponseBodyForLog(response);
-			throw new Error(
-				`Output upload failed with HTTP ${response.status}${statusText}. Response body: ${responseBody}`
+			throw new OutputUploadHttpError(
+				`Output upload failed with HTTP ${response.status}${statusText}. Response body: ${responseBody}`,
+				response.status
 			);
 		}
 
-		jobLogger.info(`[transcode] Finished uploading output for job '${jobID}'.`);
+		jobLogger.info(
+			`[transcode] Finished uploading output for job '${jobID}' on attempt ${attempt}/${outputUploadMaxAttempts}.`
+		);
 	} finally {
 		activeTransferAbortController = null;
+	}
+};
+
+const uploadOutput = async (
+	socket: Socket,
+	jobID: number,
+	sourcePath: string,
+	jobLogger: ReturnType<typeof CreateFileLogger>
+) => {
+	const outputStats = await stat(sourcePath);
+
+	for (let attempt = 1; attempt <= outputUploadMaxAttempts; attempt++) {
+		throwIfJobCancelled(jobID);
+
+		try {
+			await uploadOutputOnce(socket, jobID, sourcePath, jobLogger, attempt, outputStats.size);
+			return;
+		} catch (err) {
+			if (await hasCompletedOutputTransfer(socket, jobID)) {
+				jobLogger.warn(
+					`[transcode] [warn] Output upload attempt ${attempt}/${outputUploadMaxAttempts} failed after the server received the file; treating job '${jobID}' output as uploaded.`
+				);
+				jobLogger.warn(FormatLogError(err));
+				return;
+			}
+
+			const canRetry =
+				attempt < outputUploadMaxAttempts &&
+				!cancelledJobIDs.has(jobID) &&
+				shouldRetryOutputUpload(err);
+			if (!canRetry) throw err;
+
+			const retryDelayMs = outputUploadRetryBaseDelayMs * attempt;
+			jobLogger.warn(
+				`[transcode] [warn] Output upload attempt ${attempt}/${outputUploadMaxAttempts} failed for job '${jobID}'. Retrying in ${retryDelayMs} ms.`
+			);
+			jobLogger.warn(FormatLogError(err));
+			await wait(retryDelayMs);
+			throwIfJobCancelled(jobID);
+		}
 	}
 };
 

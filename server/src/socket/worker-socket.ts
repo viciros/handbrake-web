@@ -251,6 +251,18 @@ export default function WorkerSocket(io: Server) {
 			}
 		);
 
+		socket.on(
+			'has-completed-output-transfer',
+			async (jobID: number, callback: (hasCompletedTransfer: boolean) => void) => {
+				if (!(await getOwnedJobStatus(jobID, 'has-completed-output-transfer'))) {
+					callback(false);
+					return;
+				}
+
+				callback(await HasCompletedWorkerOutputTransfer(workerID, jobID));
+			}
+		);
+
 		socket.on('transcode-stopped', async (job_id: number, callback: () => void) => {
 			if (!(await getOwnedJobStatus(job_id, 'transcode-stopped'))) {
 				callback();
