@@ -1,3 +1,4 @@
+import type { WorkerAuthTokenRecordType } from '@handbrake-web/shared/types/auth';
 import { QueueType } from '@handbrake-web/shared/types/queue';
 import { WorkerIDType } from '@handbrake-web/shared/types/socket';
 import { IsActiveTranscodeStage } from '@handbrake-web/shared/types/transcode';
@@ -10,9 +11,16 @@ interface Properties {
 	queue: QueueType;
 	workers: WorkerIDType[];
 	properties: WorkerPropertiesMap;
+	workerTokens: WorkerAuthTokenRecordType[];
 }
 
-export default function WorkersSection({ queue, workers, properties }: Properties) {
+export default function WorkersSection({ queue, workers, properties, workerTokens }: Properties) {
+	const onlineWorkerIDs = new Set(workers.map((worker) => worker.workerID));
+	const workerTokensByID = new Map(workerTokens.map((token) => [token.worker_id, token]));
+	const workerIDs = [
+		...new Set([...workerTokens.map((token) => token.worker_id), ...onlineWorkerIDs]),
+	].sort((a, b) => a.localeCompare(b));
+
 	return (
 		<Section className={styles['workers']} heading='Workers' link='/workers'>
 			<DashboardTable>
@@ -22,49 +30,64 @@ export default function WorkersSection({ queue, workers, properties }: Propertie
 						<th>Application Version</th>
 						<th>HandBrake Version</th>
 						<th>Capabilities</th>
-						<th>Status</th>
+						<th>Connection</th>
+						<th>Scheduling</th>
+						<th>Activity</th>
 					</tr>
 				</thead>
 				<tbody>
-					{workers.map((worker) => {
-						const status = queue.find(
-							(job) =>
-								job.worker_id == worker.workerID &&
-								IsActiveTranscodeStage(job.transcode_stage)
-						)
-							? 'Working'
-							: 'Idle';
-						const workerProperties = properties[worker.workerID];
+					{workerIDs.map((workerID) => {
+						const isOnline = onlineWorkerIDs.has(workerID);
+						const acceptsJobs = workerTokensByID.get(workerID)?.accepts_jobs !== false;
+						const isWorking =
+							isOnline &&
+							queue.some(
+								(job) =>
+									job.worker_id == workerID &&
+									IsActiveTranscodeStage(job.transcode_stage)
+							);
+						const status = !isOnline ? 'N/A' : isWorking ? 'Working' : 'Idle';
+						const workerProperties = properties[workerID];
+						const propertiesFallback = isOnline ? 'Loading' : 'N/A';
 
 						return (
-							<tr key={`worker-${worker.workerID}`}>
-								<td>{worker.workerID}</td>
+							<tr key={`worker-${workerID}`}>
+								<td>{workerID}</td>
 								<td align='center'>
-									{workerProperties?.version.application || 'Loading'}
+									{workerProperties?.version.application || propertiesFallback}
 								</td>
 								<td align='center'>
-									{workerProperties?.version.handbrake || 'Loading'}
+									{workerProperties?.version.handbrake || propertiesFallback}
 								</td>
 								<td align='center'>
 									{workerProperties
 										? Object.entries(workerProperties.capabilities)
 												.filter(([_, available]) => available)
 												.map(([capability]) => (
-													<span
-														className={styles['capability']}
-														key={`${worker.workerID}-${capability}`}
-													>
-														{capability.toUpperCase()}
-													</span>
+														<span
+															className={styles['capability']}
+															key={`${workerID}-${capability}`}
+														>
+															{capability.toUpperCase()}
+														</span>
 												))
-										: 'Loading'}
+										: propertiesFallback}
+								</td>
+								<td align='center'>
+									<span className={styles['status']} data-online={isOnline}>
+										{isOnline ? 'Online' : 'Offline'}
+									</span>
+								</td>
+								<td align='center'>
+									<span className={styles['status']} data-enabled={acceptsJobs}>
+										{acceptsJobs ? 'Enabled' : 'Disabled'}
+									</span>
 								</td>
 								<td
-									className={`${
-										status == 'Working' ? 'color-blue' : 'color-yellow'
-									}`}
 									align='center'
-									data-working={status == 'Working'}
+									data-working={
+										status == 'N/A' ? undefined : status == 'Working'
+									}
 								>
 									{status}
 								</td>

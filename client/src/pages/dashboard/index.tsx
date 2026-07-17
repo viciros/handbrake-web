@@ -9,8 +9,16 @@ import WatchersSection from './sections/watchers-section';
 import styles from './styles.module.scss';
 
 export default function DashboardSection() {
-	const { socket, queue, queueStatus, presets, connections, properties, watchers } =
-		useContext(PrimaryContext)!;
+	const {
+		socket,
+		queue,
+		queueStatus,
+		presets,
+		connections,
+		properties,
+		watchers,
+		workerTokens,
+	} = useContext(PrimaryContext)!;
 
 	return (
 		<Page className={styles['dashboard']} heading='Dashboard'>
@@ -18,7 +26,12 @@ export default function DashboardSection() {
 			<QueueSection queue={queue} />
 			<PresetsSection presets={presets} />
 			<WatchersSection watchers={watchers} />
-			<WorkersSection queue={queue} workers={connections.workers} properties={properties} />
+			<WorkersSection
+				queue={queue}
+				workers={connections.workers}
+				properties={properties}
+				workerTokens={workerTokens}
+			/>
 		</Page>
 	);
 }
