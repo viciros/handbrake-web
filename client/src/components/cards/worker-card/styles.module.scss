@@ -28,7 +28,7 @@
 				padding: 0.5rem 1rem;
 
 				&[data-supported='true'] {
-					color: var(--handbrake-blue);
+					color: var(--handbrake-blue-text);
 				}
 
 				&[data-supported='false'] {
@@ -40,7 +40,7 @@
 				}
 
 				&[data-status='working'] {
-					color: var(--handbrake-blue);
+					color: var(--handbrake-blue-text);
 				}
 			}
 

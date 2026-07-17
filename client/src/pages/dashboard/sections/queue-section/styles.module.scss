@@ -41,11 +41,11 @@
 	}
 
 	[data-status='transcoding'] {
-		color: var(--handbrake-blue);
+		color: var(--handbrake-blue-text);
 	}
 
 	[data-status='finished'] {
-		color: var(--handbrake-green);
+		color: var(--handbrake-green-text);
 	}
 
 	.progress {

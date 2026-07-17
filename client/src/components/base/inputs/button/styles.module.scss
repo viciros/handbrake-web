@@ -17,8 +17,7 @@
 	box-shadow: 0 0 1rem black;
 
 	background-color: var(--handbrake-green);
-	color: var(--text-primary);
-	text-shadow: 0 0 1rem var(--background-primary);
+	color: var(--background-primary);
 
 	.icon {
 		width: calc(var(--button-content-size) + 0.25rem);
@@ -29,8 +28,15 @@
 	}
 
 	&:hover:not(:disabled) {
-		opacity: 80%;
+		box-shadow:
+			0 0 1rem black,
+			0 0 0 0.125rem var(--text-primary);
 		cursor: pointer;
+	}
+
+	&:focus-visible {
+		outline: 0.15rem solid var(--text-primary);
+		outline-offset: 0.15rem;
 	}
 
 	&:disabled {
@@ -43,6 +49,8 @@
 
 	&[data-color='red'] {
 		background-color: var(--handbrake-red);
+		color: var(--text-primary);
+		text-shadow: 0 0 1rem var(--background-primary);
 	}
 
 	&[data-color='orange'] {
@@ -59,6 +67,8 @@
 
 	&[data-color='blue'] {
 		background-color: var(--handbrake-blue);
+		color: var(--text-primary);
+		text-shadow: 0 0 1rem var(--background-primary);
 	}
 
 	&[data-color='magenta'] {

@@ -1,6 +1,6 @@
 .workers {
 	[data-working='true'] {
-		color: var(--handbrake-blue);
+		color: var(--handbrake-blue-text);
 	}
 
 	[data-working='false'] {
@@ -16,7 +16,7 @@
 
 		&[data-online='true'],
 		&[data-enabled='true'] {
-			color: var(--handbrake-green);
+			color: var(--handbrake-green-text);
 		}
 
 		&[data-online='false'],

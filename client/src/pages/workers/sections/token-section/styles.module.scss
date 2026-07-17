@@ -65,7 +65,7 @@
 		color: var(--text-tertiary);
 
 		&[data-online='true'] {
-			color: var(--handbrake-green);
+			color: var(--handbrake-green-text);
 		}
 
 		&[data-online='false'] {
@@ -73,7 +73,7 @@
 		}
 
 		&[data-enabled='true'] {
-			color: var(--handbrake-green);
+			color: var(--handbrake-green-text);
 		}
 
 		&[data-enabled='false'] {
