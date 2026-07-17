@@ -40,7 +40,7 @@ export default function QueueSection({ queue }: Properties) {
 						<th>File</th>
 						<th>Worker</th>
 						<th>Status</th>
-						<th>Time Finished</th>
+						<th>Time</th>
 						<th>Progress</th>
 					</tr>
 				</thead>
