@@ -55,16 +55,21 @@ export default function JobsSection({
 				<ButtonInput
 					label='Clear All Jobs'
 					Icon={ClearAllIcon}
-					color='orange'
+					color='blue'
 					onClick={handleClearAllJobs}
 				/>
 				<ButtonInput
 					label='Clear Finished Jobs'
 					Icon={ClearFinishedIcon}
-					color='yellow'
+					color='blue'
 					onClick={handleClearFinishedJobs}
 				/>
-				<ButtonInput label='Add New Job' Icon={AddNewIcon} onClick={handleAddNewJob} />
+				<ButtonInput
+					label='Add New Job'
+					Icon={AddNewIcon}
+					color='blue'
+					onClick={handleAddNewJob}
+				/>
 			</div>
 			{jobsWaiting.length > 0 &&
 				connections.workers.filter((worker) => {
