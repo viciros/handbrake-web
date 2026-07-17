@@ -15,6 +15,7 @@ interface QueueTableProperties {
 	jobs: QueueType;
 	timeHeading: string;
 	formatTime: (job: QueueType[number]) => string;
+	showProgress: boolean;
 }
 
 const secondsToTime = (seconds: number) => {
@@ -56,7 +57,7 @@ const sortQueueJobs = (queue: QueueType) =>
 const sortFinishedJobs = (queue: QueueType) =>
 	[...queue].sort((a, b) => (b.time_finished || 0) - (a.time_finished || 0));
 
-function QueueTable({ jobs, timeHeading, formatTime }: QueueTableProperties) {
+function QueueTable({ jobs, timeHeading, formatTime, showProgress }: QueueTableProperties) {
 	return (
 		<DashboardTable>
 			<thead>
@@ -66,17 +67,14 @@ function QueueTable({ jobs, timeHeading, formatTime }: QueueTableProperties) {
 					<th>Worker</th>
 					<th>Status</th>
 					<th>{timeHeading}</th>
-					<th>Progress</th>
+					{showProgress && <th>Progress</th>}
 				</tr>
 			</thead>
 			<tbody>
 				{jobs.map((job) => {
-					const percentage =
-						job.transcode_stage == TranscodeStage.Finished
-							? 100
-							: job.transcode_percentage
-							? job.transcode_percentage * 100
-							: 0;
+					const percentage = job.transcode_percentage
+						? job.transcode_percentage * 100
+						: 0;
 
 					return (
 						<tr key={`queue-job-${job.job_id}`}>
@@ -97,12 +95,14 @@ function QueueTable({ jobs, timeHeading, formatTime }: QueueTableProperties) {
 								{TranscodeStage[job.transcode_stage || 0]}
 							</td>
 							<td align='center'>{formatTime(job)}</td>
-							<td className={styles['progress']}>
-								<ProgressBar
-									className={styles['percentage']}
-									percentage={percentage}
-								/>
-							</td>
+							{showProgress && (
+								<td className={styles['progress']}>
+									<ProgressBar
+										className={styles['percentage']}
+										percentage={percentage}
+									/>
+								</td>
+							)}
 						</tr>
 					);
 				})}
@@ -126,6 +126,7 @@ export default function QueueSection({ queue }: Properties) {
 					jobs={queuedJobs}
 					timeHeading='Time Remaining'
 					formatTime={formatTimeRemaining}
+					showProgress={true}
 				/>
 			</Section>
 			<Section className={styles['queue']} heading='Finished Transcodes' link='/queue'>
@@ -133,6 +134,7 @@ export default function QueueSection({ queue }: Properties) {
 					jobs={finishedJobs}
 					timeHeading='Completed At'
 					formatTime={formatCompletedAt}
+					showProgress={false}
 				/>
 			</Section>
 		</>
