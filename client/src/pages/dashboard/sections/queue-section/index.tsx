@@ -13,6 +13,8 @@ interface Properties {
 
 interface QueueTableProperties {
 	jobs: QueueType;
+	timeHeading: string;
+	formatTime: (job: QueueType[number]) => string;
 }
 
 const secondsToTime = (seconds: number) => {
@@ -24,15 +26,15 @@ const secondsToTime = (seconds: number) => {
 		.join(':');
 };
 
-const formatFinishedTime = (timeFinished: number) =>
-	timeFinished ? new Date(timeFinished).toLocaleString() : 'N/A';
-
-const formatJobTime = (job: QueueType[number]) =>
+const formatTimeRemaining = (job: QueueType[number]) =>
 	IsActiveTranscodeStage(job.transcode_stage)
 		? job.transcode_eta
 			? secondsToTime(job.transcode_eta)
 			: 'N/A'
-		: formatFinishedTime(job.time_finished);
+		: 'N/A';
+
+const formatCompletedAt = (job: QueueType[number]) =>
+	job.time_finished ? new Date(job.time_finished).toLocaleString() : 'N/A';
 
 const sortQueueJobs = (queue: QueueType) =>
 	[...queue].sort((a, b) => {
@@ -54,7 +56,7 @@ const sortQueueJobs = (queue: QueueType) =>
 const sortFinishedJobs = (queue: QueueType) =>
 	[...queue].sort((a, b) => (b.time_finished || 0) - (a.time_finished || 0));
 
-function QueueTable({ jobs }: QueueTableProperties) {
+function QueueTable({ jobs, timeHeading, formatTime }: QueueTableProperties) {
 	return (
 		<DashboardTable>
 			<thead>
@@ -63,15 +65,18 @@ function QueueTable({ jobs }: QueueTableProperties) {
 					<th>File</th>
 					<th>Worker</th>
 					<th>Status</th>
-					<th>Time</th>
+					<th>{timeHeading}</th>
 					<th>Progress</th>
 				</tr>
 			</thead>
 			<tbody>
 				{jobs.map((job) => {
-					const percentage = job.transcode_percentage
-						? job.transcode_percentage * 100
-						: 0;
+					const percentage =
+						job.transcode_stage == TranscodeStage.Finished
+							? 100
+							: job.transcode_percentage
+							? job.transcode_percentage * 100
+							: 0;
 
 					return (
 						<tr key={`queue-job-${job.job_id}`}>
@@ -91,7 +96,7 @@ function QueueTable({ jobs }: QueueTableProperties) {
 							>
 								{TranscodeStage[job.transcode_stage || 0]}
 							</td>
-							<td align='center'>{formatJobTime(job)}</td>
+							<td align='center'>{formatTime(job)}</td>
 							<td className={styles['progress']}>
 								<ProgressBar
 									className={styles['percentage']}
@@ -117,10 +122,18 @@ export default function QueueSection({ queue }: Properties) {
 	return (
 		<>
 			<Section className={styles['queue']} heading='Queue' link='/queue'>
-				<QueueTable jobs={queuedJobs} />
+				<QueueTable
+					jobs={queuedJobs}
+					timeHeading='Time Remaining'
+					formatTime={formatTimeRemaining}
+				/>
 			</Section>
 			<Section className={styles['queue']} heading='Finished Transcodes' link='/queue'>
-				<QueueTable jobs={finishedJobs} />
+				<QueueTable
+					jobs={finishedJobs}
+					timeHeading='Completed At'
+					formatTime={formatCompletedAt}
+				/>
 			</Section>
 		</>
 	);
