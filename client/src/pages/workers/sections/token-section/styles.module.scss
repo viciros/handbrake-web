@@ -68,6 +68,10 @@
 			color: var(--handbrake-green);
 		}
 
+		&[data-online='false'] {
+			color: var(--handbrake-orange);
+		}
+
 		&[data-enabled='true'] {
 			color: var(--handbrake-green);
 		}

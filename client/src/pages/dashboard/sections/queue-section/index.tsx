@@ -37,8 +37,7 @@ export default function QueueSection({ queue }: Properties) {
 				<thead>
 					<tr>
 						<th>#</th>
-						<th>Input</th>
-						<th>Output</th>
+						<th>File</th>
 						<th>Worker</th>
 						<th>Status</th>
 						<th>Time Finished</th>
@@ -100,10 +99,6 @@ export default function QueueSection({ queue }: Properties) {
 									<td className={styles['input']} title={job.input_path}>
 										{job.input_path.match(/[^/]+$/)}
 										<BadgeInfo info={job.input_path} />
-									</td>
-									<td className={styles['output']} title={job.output_path}>
-										{job.output_path.match(/[^/]+$/)}
-										<BadgeInfo info={job.output_path} />
 									</td>
 									<td align='center'>{job.worker_id || 'N/A'}</td>
 									<td
