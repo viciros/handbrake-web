@@ -8,7 +8,7 @@ import { database } from './database';
 
 const normalizeWorkerAuthToken = (token: WorkerAuthTokenType): WorkerAuthTokenType => ({
 	...token,
-	is_enabled: token.is_enabled == undefined ? true : Boolean(token.is_enabled),
+	accepts_jobs: token.accepts_jobs == undefined ? true : Boolean(token.accepts_jobs),
 	last_used_at: token.last_used_at ?? null,
 });
 

@@ -113,9 +113,13 @@ export async function GetAvailableWorkers() {
 	const availableWorkers = GetWorkers().filter((worker) => {
 		const workerID = GetWorkerID(worker);
 
-		return !busyWorkers.includes(workerID);
+		return WorkerAcceptsJobs(worker) && !busyWorkers.includes(workerID);
 	});
 	return availableWorkers;
+}
+
+export function WorkerAcceptsJobs(worker: Worker) {
+	return worker.data.acceptsJobs !== false;
 }
 
 export function GetEligibleWorkers(
@@ -200,6 +204,20 @@ export async function JobForAvailableWorkers(jobID: number) {
 
 export async function WorkerForAvailableJobs(workerID: string) {
 	if ((await GetQueueStatus()) != QueueStatus.Stopped) {
+		const worker = GetWorkerWithID(workerID);
+		if (!worker || !WorkerAcceptsJobs(worker)) {
+			logger.info(
+				`[server] [queue] Worker with ID '${workerID}' is disabled and will not receive a new job.`
+			);
+			return;
+		}
+		if ((await GetBusyWorkers()).includes(workerID)) {
+			logger.info(
+				`[server] [queue] Worker with ID '${workerID}' is already busy and will not receive another job.`
+			);
+			return;
+		}
+
 		logger.info(
 			`[server] [queue] Worker with ID '${workerID}' is available, checking for available jobs...`
 		);
@@ -210,7 +228,6 @@ export async function WorkerForAvailableJobs(workerID: string) {
 		const eligibleJobs = GetEligibleJobs(availableJobs, workerCapabilities);
 
 		if (eligibleJobs.length > 0) {
-			const worker = GetWorkerWithID(workerID);
 			const selectedJob = eligibleJobs[0];
 			if (selectedJob && worker) {
 				const didStart = await StartJob(selectedJob, worker);
@@ -350,6 +367,12 @@ export async function AddJob(data: AddJobType) {
 
 export async function StartJob(job: DetailedJobType, worker: Worker) {
 	const workerID = GetWorkerID(worker);
+	if (!WorkerAcceptsJobs(worker)) {
+		logger.info(
+			`[queue] Worker '${workerID}' was disabled before job '${job.job_id}' could be claimed.`
+		);
+		return false;
+	}
 
 	const didClaim = await DatabaseClaimWaitingJob(job.job_id, workerID);
 	if (!didClaim) {
@@ -360,6 +383,14 @@ export async function StartJob(job: DetailedJobType, worker: Worker) {
 	}
 
 	try {
+		if (!WorkerAcceptsJobs(worker)) {
+			logger.info(
+				`[queue] Worker '${workerID}' was disabled while job '${job.job_id}' was being claimed. Releasing the claim.`
+			);
+			await DatabaseReleaseClaimedJob(job.job_id, workerID);
+			return false;
+		}
+
 		const ack: StartTranscodeAck = await worker
 			.timeout(15000)
 			.emitWithAck('start-transcode', job.job_id);

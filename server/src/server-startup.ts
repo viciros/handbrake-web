@@ -57,7 +57,7 @@ export default async function ServerStartup() {
 	const server = createServer(app);
 	const socket = new SocketServer(server, {
 		cors: corsOptions,
-		pingTimeout: 5000,
+		pingTimeout: 20000,
 	});
 
 	app.use(cors(corsOptions));

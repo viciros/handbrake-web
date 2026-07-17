@@ -18,7 +18,7 @@ export type UpdateClientCredentialsResultType = {
 
 export type WorkerAuthTokenRecordType = {
 	worker_id: string;
-	is_enabled: boolean;
+	accepts_jobs: boolean;
 	created_at: number;
 	updated_at: number;
 	last_used_at: number | null;

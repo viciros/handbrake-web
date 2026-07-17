@@ -43,7 +43,7 @@ export type UpdateClientAuthType = Updateable<ClientAuthTable>;
 export interface WorkerAuthTokensTable {
 	worker_id: string;
 	token_hash: string;
-	is_enabled: Generated<boolean>;
+	accepts_jobs: Generated<boolean>;
 	created_at: number;
 	updated_at: number;
 	last_used_at: number | null;

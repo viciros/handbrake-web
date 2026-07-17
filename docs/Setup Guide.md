@@ -123,6 +123,15 @@ environment:
 
 Worker tokens authenticate workers to the server. HTTPS/TLS lets remote workers verify the server and keeps tokens and media streams encrypted over untrusted networks.
 
+Workers remain running and retry the server indefinitely with capped backoff when the server is unavailable, rejects authentication, or requests a disconnect. Disabling a worker in the Workers page prevents new job assignments without disconnecting it; an active job is allowed to finish. Rotate or revoke the worker token when you need to invalidate authentication.
+
+The server waits for watched files to have unchanged size and modification time for 30 seconds before adding them to the queue. Set `HANDBRAKE_WATCHER_STABILITY_SECONDS` in the server container environment to change the quiet period:
+
+```yaml
+environment:
+  - HANDBRAKE_WATCHER_STABILITY_SECONDS=30
+```
+
 ### Step 3 - Start Containers
 
 At this point, you should be good to go. Run the following command:

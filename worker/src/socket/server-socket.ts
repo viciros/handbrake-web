@@ -2,6 +2,7 @@ import type { WorkerProperties } from '@handbrake-web/shared/types/worker';
 import logger from 'logging';
 import { GetWorkerProperties } from 'scripts/properties';
 import { Socket } from 'socket.io-client';
+import { ConnectionRetryController } from '../connection-retry';
 import {
 	currentJobID,
 	isStartingTranscode,
@@ -14,25 +15,19 @@ import { serverAddress } from '../worker-startup';
 
 const workerID = process.env.WORKER_ID;
 
-export default function ServerSocket(server: Socket) {
+export default function ServerSocket(server: Socket, retryController: ConnectionRetryController) {
 	server.on('connect', () => {
+		retryController.connected();
 		logger.info(`[socket] Connected to the server '${serverAddress}' with id '${server.id}'.`);
 	});
 
 	server.on('connect_error', (error) => {
-		if (server.active) {
-			logger.info(`[socket] Connection to server lost, will attempt reconnection...`);
-		} else {
-			logger.error(`[socket] Connection to server lost, will not attempt reconnection...`);
-			logger.error(error);
-		}
+		retryController.failed('Could not connect to the server', error);
 	});
 
 	server.on('disconnect', (reason, details) => {
 		logger.info(`[socket] Disconnected from the server with reason '${reason}'.`);
-		if (details) {
-			logger.info(details);
-		}
+		retryController.failed(`Disconnected from the server with reason '${reason}'`, details);
 	});
 
 	server.on('get-properties', async (callback: (properties: WorkerProperties) => void) => {

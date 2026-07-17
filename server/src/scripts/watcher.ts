@@ -56,8 +56,22 @@ import {
 	AssertExistingPathInMediaRoots,
 } from './path-safety';
 
-const watchers: { [index: number]: FSWatcher } = [];
+type WatcherRuntime = {
+	watcher: FSWatcher;
+	abortController: AbortController;
+	pendingFiles: Map<string, Promise<void>>;
+};
+
+type WaitForFileReadyOptions = {
+	stabilityMs?: number;
+	pollIntervalMs?: number;
+	signal?: AbortSignal;
+};
+
+const watchers: { [index: number]: WatcherRuntime } = [];
 const maxWatcherRegexLength = 256;
+const defaultWatcherStabilitySeconds = 30;
+const watcherPollIntervalMs = 1000;
 const regexLiteralRegex =
 	/^\/((?![*+?])(?:[^\r\n\[/\\]|\\.|\[(?:[^\r\n\]\\]|\\.)*\])+)\/((?:g(?:im?|mi?)?|i(?:gm?|mg?)?|m(?:gi?|ig?)?)?)$/;
 const nestedQuantifierRegex =
@@ -65,6 +79,76 @@ const nestedQuantifierRegex =
 const repeatedAlternationRegex =
 	/\((?:[^()\\]|\\.)+\|(?:[^()\\]|\\.)+\)(?:[+*]|\{\d+,?\d*\})/;
 const backReferenceRegex = /\\[1-9]/;
+
+export function GetWatcherStabilityMs(value = process.env.HANDBRAKE_WATCHER_STABILITY_SECONDS) {
+	if (value == undefined || value.trim() == '') return defaultWatcherStabilitySeconds * 1000;
+
+	const seconds = Number(value);
+	if (!Number.isFinite(seconds) || seconds <= 0) {
+		logger.warn(
+			`[watcher] [warn] Invalid HANDBRAKE_WATCHER_STABILITY_SECONDS value '${value}'; using ${defaultWatcherStabilitySeconds} seconds.`
+		);
+		return defaultWatcherStabilitySeconds * 1000;
+	}
+
+	return seconds * 1000;
+}
+
+const waitForPoll = (delayMs: number, signal?: AbortSignal) =>
+	new Promise<boolean>((resolve) => {
+		if (signal?.aborted) {
+			resolve(false);
+			return;
+		}
+
+		const onAbort = () => {
+			clearTimeout(timeout);
+			resolve(false);
+		};
+		const timeout = setTimeout(() => {
+			signal?.removeEventListener('abort', onAbort);
+			resolve(true);
+		}, delayMs);
+		signal?.addEventListener('abort', onAbort, { once: true });
+	});
+
+export async function WaitForFileReady(
+	filePath: string,
+	options: WaitForFileReadyOptions = {}
+): Promise<boolean> {
+	const stabilityMs = options.stabilityMs ?? GetWatcherStabilityMs();
+	const pollIntervalMs = options.pollIntervalMs ?? Math.min(watcherPollIntervalMs, stabilityMs);
+	let previousStats: { size: number; mtimeMs: number } | undefined;
+	let stableSince = Date.now();
+
+	while (!options.signal?.aborted) {
+		let fileStats;
+		try {
+			fileStats = await fs.stat(filePath);
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code == 'ENOENT') return false;
+			throw err;
+		}
+
+		if (!fileStats.isFile()) return false;
+		const currentStats = { size: fileStats.size, mtimeMs: fileStats.mtimeMs };
+
+		if (
+			previousStats &&
+			previousStats.size == currentStats.size &&
+			previousStats.mtimeMs == currentStats.mtimeMs
+		) {
+			if (Date.now() - stableSince >= stabilityMs) return true;
+		} else {
+			previousStats = currentStats;
+			stableSince = Date.now();
+		}
+
+		if (!(await waitForPoll(pollIntervalMs, options.signal))) return false;
+	}
+
+	return false;
+}
 
 const parseWatcherRegex = (value: string) => {
 	const splitRegex = value.match(regexLiteralRegex);
@@ -147,10 +231,15 @@ export async function RegisterWatcher(watcher: DetailedWatcherType) {
 	ValidateWatcherRules(watcher.rules);
 
 	const newWatcher = chokidar.watch(watcher.watch_path, {
-		awaitWriteFinish: true,
 		ignoreInitial: true,
 		ignorePermissionErrors: true,
 	});
+	const runtime: WatcherRuntime = {
+		watcher: newWatcher,
+		abortController: new AbortController(),
+		pendingFiles: new Map(),
+	};
+	const stabilityMs = GetWatcherStabilityMs();
 
 	const handleWatcherEvent = (
 		eventName: string,
@@ -166,7 +255,29 @@ export async function RegisterWatcher(watcher: DetailedWatcherType) {
 	};
 
 	newWatcher.on('add', (filePath) => {
-		handleWatcherEvent('add', filePath, onWatcherDetectFileAdd);
+		if (runtime.pendingFiles.has(filePath)) return;
+
+		const pendingFile = WaitForFileReady(filePath, {
+			stabilityMs,
+			signal: runtime.abortController.signal,
+		})
+			.then(async (isReady) => {
+				if (!isReady) return;
+				logger.info(
+					`[server] [watcher] File '${path.basename(filePath)}' is stable and ready for processing.`
+				);
+				await onWatcherDetectFileAdd(watcher, filePath);
+			})
+			.catch((err) => {
+				logger.error(
+					`[server] [watcher] [error] Watcher '${watcher.watcher_id}' failed while waiting for '${filePath}' to become ready.`
+				);
+				logger.error(err);
+			})
+			.finally(() => {
+				runtime.pendingFiles.delete(filePath);
+			});
+		runtime.pendingFiles.set(filePath, pendingFile);
 	});
 
 	newWatcher.on('unlink', (filePath) => {
@@ -181,7 +292,7 @@ export async function RegisterWatcher(watcher: DetailedWatcherType) {
 		logger.error(error);
 	});
 
-	watchers[watcher.watcher_id] = newWatcher;
+	watchers[watcher.watcher_id] = runtime;
 
 	logger.info(`[server] [watcher] Registered watcher for '${watcher.watch_path}'.`);
 }
@@ -193,8 +304,10 @@ export async function DeregisterWatcher(id: number) {
 			logger.info(`[server] [watcher] Watcher '${id}' is not registered.`);
 			return;
 		}
-		const directory = Object.entries(watchers[id].getWatched())[0].join('/');
-		await watchers[id].close();
+		const runtime = watchers[id];
+		const directory = Object.entries(runtime.watcher.getWatched())[0].join('/');
+		runtime.abortController.abort();
+		await runtime.watcher.close();
 		logger.info(`[server] [watcher] Deregistered watcher for '${directory}'.`);
 
 		delete watchers[id];

@@ -9,6 +9,7 @@ export class CustomMigrationProvider implements MigrationProvider {
 			'migration-4': await import('../migrations/migration-4'),
 			'migration-5': await import('../migrations/migration-5'),
 			'migration-6': await import('../migrations/migration-6'),
+			'migration-7': await import('../migrations/migration-7'),
 		};
 
 		return migrations;

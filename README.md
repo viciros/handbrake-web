@@ -94,6 +94,10 @@ On each server start until the web UI credentials are changed, HandBrake Web log
 
 Create a token for each worker on the Workers page, then put the one-time token value into that worker's `WORKER_TOKEN` environment variable. Set the worker's `SERVER_URL` to the full server URL, including the scheme and any non-default port. For remote workers outside a trusted local network, expose the server over HTTPS/TLS and use an `https://` URL.
 
+Workers retry server connections indefinitely with capped backoff, including after authentication failures and server-requested disconnects. Disabling a worker in the web UI only prevents it from receiving new jobs: it stays connected and finishes any active job. Rotate or revoke its token when you need to invalidate authentication.
+
+Watch folders wait until a file's size and modification time have both remained unchanged for 30 seconds before creating a job. Set `HANDBRAKE_WATCHER_STABILITY_SECONDS` on the server to change this quiet period for slower or faster storage.
+
 ## Usage
 
 ### Presets

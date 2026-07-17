@@ -1,16 +1,17 @@
 import logger from 'logging';
 import { currentJobID, SelfStopTranscode } from 'scripts/transcode';
 import { Socket } from 'socket.io-client';
+import { ConnectionRetryController } from './connection-retry';
 
 let shutdownInProgress: Promise<void> | undefined;
 
-export function RegisterExitListeners(socket: Socket) {
+export function RegisterExitListeners(socket: Socket, retryController: ConnectionRetryController) {
 	process.on('SIGINT', async () => {
 		if (!shutdownInProgress) {
 			logger.info(
 				`[shutdown] The process has been interrupted, HandBrake Web will now begin to shutdown...`
 			);
-			shutdownInProgress = Shutdown(socket);
+			shutdownInProgress = Shutdown(socket, retryController);
 		} else {
 			logger.warn(
 				`[shutdown] [warn] The process has been interrupted, but there is already a shutdown in progress.`
@@ -23,7 +24,7 @@ export function RegisterExitListeners(socket: Socket) {
 			logger.info(
 				`[shutdown] The process has been terminated, HandBrake Web will now begin to shutdown...`
 			);
-			shutdownInProgress = Shutdown(socket);
+			shutdownInProgress = Shutdown(socket, retryController);
 		} else {
 			logger.warn(
 				`[shutdown] [warn] The process has been terminated, but there is already a shutdown in progress.`
@@ -32,8 +33,9 @@ export function RegisterExitListeners(socket: Socket) {
 	});
 }
 
-export default async function Shutdown(socket: Socket) {
+export default async function Shutdown(socket: Socket, retryController: ConnectionRetryController) {
 	try {
+		retryController.stop();
 		if (currentJobID) {
 			// await StopTranscode(currentJobID, socket);
 			await SelfStopTranscode(socket);

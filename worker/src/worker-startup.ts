@@ -4,6 +4,7 @@ import { isIP } from 'node:net';
 import { GetWorkerProperties } from 'scripts/properties';
 import { io } from 'socket.io-client';
 import ServerSocket from 'socket/server-socket';
+import { ConnectionRetryController } from './connection-retry';
 import { RegisterExitListeners } from './worker-shutdown';
 
 export let serverAddress = '';
@@ -66,54 +67,61 @@ export const GetServerBaseAddress = (serverURL: string) => {
 	return url.toString().replace(/\/$/, '');
 };
 
+const WaitForConfigurationRestart = (message: string) => {
+	logger.error(
+		`${message} The worker will remain online but cannot connect; update the environment and restart the container.`
+	);
+	setInterval(() => {
+		logger.warn(`[socket] [warn] Worker is still waiting for corrected connection configuration.`);
+	}, 5 * 60 * 1000);
+};
+
 export default async function WorkerStartup() {
 	// Setup -------------------------------------------------------------------------------------------
 
-	// Get worker ID from env variable, exit process if it is not set --------------
+	// Validate required connection configuration ----------------------------------
 	const workerID = process.env.WORKER_ID;
 	const workerToken = process.env.WORKER_TOKEN;
-	if (!workerID) {
-		logger.error(
-			"No 'WORKER_ID' envrionment variable is set - this worker will not be set up. Please set this via your docker-compose environment section."
+	const serverURL = process.env.SERVER_URL;
+	const missingConfiguration = [
+		!workerID ? 'WORKER_ID' : undefined,
+		!workerToken ? 'WORKER_TOKEN' : undefined,
+		!serverURL ? 'SERVER_URL' : undefined,
+	].filter((value): value is string => value != undefined);
+	if (missingConfiguration.length > 0) {
+		WaitForConfigurationRestart(
+			`Missing required worker configuration: ${missingConfiguration.join(', ')}.`
 		);
-		process.exit(0);
-	}
-	if (!workerToken) {
-		logger.error(
-			"No 'WORKER_TOKEN' environment variable is set - this worker cannot authenticate to the server. Create a worker token in the server Web UI."
-		);
-		process.exit(0);
+		return;
 	}
 
 	// Init worker properties
 	await GetWorkerProperties();
 
 	// Setup the server ------------------------------------------------------------
-	const serverURL = process.env.SERVER_URL;
-
-	const canConnect = serverURL != undefined;
-	if (canConnect) {
-		serverBaseAddress = GetServerBaseAddress(serverURL);
-		serverAddress = `${serverBaseAddress}/worker`;
+	try {
+		serverBaseAddress = GetServerBaseAddress(serverURL!);
+	} catch (err) {
+		WaitForConfigurationRestart(
+			`Invalid SERVER_URL configuration: ${err instanceof Error ? err.message : String(err)}.`
+		);
+		return;
 	}
+	serverAddress = `${serverBaseAddress}/worker`;
 
 	const server = io(serverAddress, {
 		autoConnect: false,
+		reconnection: false,
 		auth: { token: workerToken },
 		query: { workerID: workerID },
 	});
 
 	// Event listeners ---------------------------------------------------------------------------------
-	ServerSocket(server);
-	RegisterExitListeners(server);
+	const retryController = new ConnectionRetryController(() => server.connect(), logger);
+	ServerSocket(server, retryController);
+	RegisterExitListeners(server, retryController);
 
 	// Worker Start ------------------------------------------------------------------------------------
-	if (canConnect) {
-		server.connect();
-		logger.info('The worker process has started.');
-	} else {
-		logger.error(
-			'The SERVER_URL environment variable is not set, no valid server to connect to.'
-		);
-	}
+	retryController.start();
+	logger.info('The worker process has started.');
 }

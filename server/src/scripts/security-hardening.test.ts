@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { randomBytes } from 'node:crypto';
-import { mkdir, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -146,10 +146,11 @@ test('validates worker IDs', async () => {
 
 test('creates, verifies, rotates, and revokes worker tokens', async () => {
 	const {
+		AuthenticateWorkerSocket,
 		CreateWorkerAuthToken,
 		RevokeWorkerAuthToken,
 		RotateWorkerAuthToken,
-		SetWorkerAuthTokenEnabled,
+		SetWorkerEnabled,
 		VerifySecretHash,
 	} = await import('./auth');
 	const { DatabaseGetWorkerAuthToken } = await import('./database/database-worker-auth');
@@ -161,23 +162,40 @@ test('creates, verifies, rotates, and revokes worker tokens', async () => {
 
 	const storedCreatedToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedCreatedToken);
-	assert.equal(storedCreatedToken.is_enabled, true);
+	assert.equal(storedCreatedToken.accepts_jobs, true);
 	assert.notEqual(storedCreatedToken.token_hash, created.token);
 	assert.equal(storedCreatedToken.token_hash.includes(created.token), false);
 	assert.equal(await VerifySecretHash(created.token, storedCreatedToken.token_hash), true);
 	assert.equal(await VerifySecretHash('wrong token', storedCreatedToken.token_hash), false);
 
-	const disabled = await SetWorkerAuthTokenEnabled(workerID, false);
+	const disabled = await SetWorkerEnabled(workerID, false);
 	assert.equal(disabled.ok, true);
 	const storedDisabledToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedDisabledToken);
-	assert.equal(storedDisabledToken.is_enabled, false);
+	assert.equal(storedDisabledToken.accepts_jobs, false);
+	const pausedWorkerSocket = {
+		id: 'paused-worker-socket',
+		data: {},
+		handshake: {
+			address: 'paused-worker-test',
+			auth: { token: created.token },
+			query: { workerID },
+		},
+		conn: { remoteAddress: 'paused-worker-test' },
+	};
+	await new Promise<void>((resolve, reject) => {
+		AuthenticateWorkerSocket(pausedWorkerSocket as never, (err) => {
+			if (err) reject(err);
+			else resolve();
+		});
+	});
+	assert.equal((pausedWorkerSocket.data as { acceptsJobs?: boolean }).acceptsJobs, false);
 
-	const enabled = await SetWorkerAuthTokenEnabled(workerID, true);
+	const enabled = await SetWorkerEnabled(workerID, true);
 	assert.equal(enabled.ok, true);
 	const storedEnabledToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedEnabledToken);
-	assert.equal(storedEnabledToken.is_enabled, true);
+	assert.equal(storedEnabledToken.accepts_jobs, true);
 
 	const rotated = await RotateWorkerAuthToken(workerID);
 	assert.equal(rotated.ok, true);
@@ -192,6 +210,52 @@ test('creates, verifies, rotates, and revokes worker tokens', async () => {
 	const revoked = await RevokeWorkerAuthToken(workerID);
 	assert.equal(revoked.ok, true);
 	assert.equal(await DatabaseGetWorkerAuthToken(workerID), undefined);
+});
+
+test('migration preserves worker job acceptance state', async () => {
+	const SQLite = (await import('better-sqlite3')).default;
+	const { Kysely, SqliteDialect } = await import('kysely');
+	const migration = await import('./database/migrations/migration-7');
+	const sqlite = new SQLite(':memory:');
+	const migrationDatabase = new Kysely<any>({
+		dialect: new SqliteDialect({ database: sqlite }),
+	});
+
+	try {
+		await migrationDatabase.schema
+			.createTable('worker_auth_tokens')
+			.addColumn('worker_id', 'text', (col) => col.primaryKey())
+			.addColumn('is_enabled', 'boolean', (col) => col.notNull())
+			.execute();
+		await migrationDatabase
+			.insertInto('worker_auth_tokens')
+			.values([
+				{ worker_id: 'enabled-worker', is_enabled: 1 },
+				{ worker_id: 'disabled-worker', is_enabled: 0 },
+			])
+			.execute();
+
+		await migration.up(migrationDatabase);
+		const migratedWorkers = await migrationDatabase
+			.selectFrom('worker_auth_tokens')
+			.select(['worker_id', 'accepts_jobs'])
+			.orderBy('worker_id')
+			.execute();
+		assert.deepEqual(migratedWorkers, [
+			{ worker_id: 'disabled-worker', accepts_jobs: 0 },
+			{ worker_id: 'enabled-worker', accepts_jobs: 1 },
+		]);
+
+		await migration.down(migrationDatabase);
+		const restoredWorker = await migrationDatabase
+			.selectFrom('worker_auth_tokens')
+			.select(['worker_id', 'is_enabled'])
+			.where('worker_id', '=', 'disabled-worker')
+			.executeTakeFirstOrThrow();
+		assert.equal(restoredWorker.is_enabled, 0);
+	} finally {
+		await migrationDatabase.destroy();
+	}
 });
 
 test('accepts independent configured input and output paths', async () => {
@@ -320,4 +384,63 @@ test('rejects unsafe watcher regex rules', async () => {
 	assert.doesNotThrow(() => AssertSafeWatcherRegex('/^movie-\\d+$/i'));
 	assert.throws(() => AssertSafeWatcherRegex('/(a+)+$/'), /not safe/);
 	assert.throws(() => AssertSafeWatcherRegex(`/${'a'.repeat(300)}/`), /longer than/);
+});
+
+test('waits for watched file size and modification time to become stable', async () => {
+	const { WaitForFileReady } = await import('./watcher');
+	const watchedFile = path.join(videoPath, 'stability-test.mkv');
+	await writeFile(watchedFile, 'aaaa');
+
+	const startedAt = Date.now();
+	const readiness = WaitForFileReady(watchedFile, {
+		stabilityMs: 40,
+		pollIntervalMs: 5,
+	});
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	await writeFile(watchedFile, 'bbbb');
+	const updatedTime = new Date(Date.now() + 1000);
+	await utimes(watchedFile, updatedTime, updatedTime);
+
+	assert.equal(await readiness, true);
+	assert.ok(Date.now() - startedAt >= 50);
+});
+
+test('cancels watched file readiness when aborted or deleted', async () => {
+	const { WaitForFileReady } = await import('./watcher');
+	const abortedFile = path.join(videoPath, 'aborted-stability-test.mkv');
+	const deletedFile = path.join(videoPath, 'deleted-stability-test.mkv');
+	await writeFile(abortedFile, 'video');
+	await writeFile(deletedFile, 'video');
+
+	const abortController = new AbortController();
+	const abortedReadiness = WaitForFileReady(abortedFile, {
+		stabilityMs: 100,
+		pollIntervalMs: 5,
+		signal: abortController.signal,
+	});
+	abortController.abort();
+	assert.equal(await abortedReadiness, false);
+
+	const deletedReadiness = WaitForFileReady(deletedFile, {
+		stabilityMs: 100,
+		pollIntervalMs: 5,
+	});
+	await rm(deletedFile);
+	assert.equal(await deletedReadiness, false);
+});
+
+test('falls back to a thirty-second watcher quiet period for invalid configuration', async () => {
+	const { GetWatcherStabilityMs } = await import('./watcher');
+
+	assert.equal(GetWatcherStabilityMs(undefined), 30_000);
+	assert.equal(GetWatcherStabilityMs('not-a-number'), 30_000);
+	assert.equal(GetWatcherStabilityMs('12.5'), 12_500);
+});
+
+test('excludes workers that are not accepting jobs', async () => {
+	const { WorkerAcceptsJobs } = await import('./queue');
+
+	assert.equal(WorkerAcceptsJobs({ data: { acceptsJobs: true } } as never), true);
+	assert.equal(WorkerAcceptsJobs({ data: { acceptsJobs: false } } as never), false);
+	assert.equal(WorkerAcceptsJobs({ data: {} } as never), true);
 });

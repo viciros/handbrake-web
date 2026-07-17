@@ -19,6 +19,7 @@ export type WorkerInfoMap = Record<string, WorkerInfo>;
 
 export default function WorkersPage() {
 	const { connections, queue, properties, socket, workerTokens } = useContext(PrimaryContext)!;
+	const workerTokensByID = new Map(workerTokens.map((token) => [token.worker_id, token]));
 
 	const workerInfo: WorkerInfoMap = Object.fromEntries(
 		connections.workers.map((worker) => {
@@ -26,11 +27,12 @@ export default function WorkersPage() {
 				(job) =>
 					job.worker_id == worker.workerID && IsActiveTranscodeStage(job.transcode_stage)
 			);
+			const acceptsJobs = workerTokensByID.get(worker.workerID)?.accepts_jobs !== false;
 			return [
 				worker.workerID,
 				{
 					properties: properties[worker.workerID],
-					status: job ? 'Working' : 'Idle',
+					status: job ? 'Working' : acceptsJobs ? 'Idle' : 'Disabled',
 					job: job ? job.input_path : 'N/A',
 					progress:
 						job && job.transcode_percentage

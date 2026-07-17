@@ -52,7 +52,7 @@ export async function InitializeDatabaseTables() {
 			.ifNotExists()
 			.addColumn('worker_id', 'text', (col) => col.notNull().primaryKey())
 			.addColumn('token_hash', 'text', (col) => col.notNull())
-			.addColumn('is_enabled', 'boolean', (col) => col.notNull().defaultTo(true))
+			.addColumn('accepts_jobs', 'boolean', (col) => col.notNull().defaultTo(true))
 			.addColumn('created_at', 'integer', (col) => col.notNull())
 			.addColumn('updated_at', 'integer', (col) => col.notNull())
 			.addColumn('last_used_at', 'integer')

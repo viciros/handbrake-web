@@ -25,6 +25,7 @@ import {
 	DatabaseInsertWorkerAuthToken,
 	DatabaseUpdateWorkerAuthToken,
 } from 'scripts/database/database-worker-auth';
+import { WorkerForAvailableJobs } from 'scripts/queue';
 
 type Credentials = {
 	username: string;
@@ -511,7 +512,7 @@ const generateWorkerToken = () => randomBytes(32).toString('base64url');
 
 const toWorkerAuthTokenRecord = (token: WorkerAuthTokenType): WorkerAuthTokenRecordType => ({
 	worker_id: token.worker_id,
-	is_enabled: token.is_enabled,
+	accepts_jobs: token.accepts_jobs,
 	created_at: token.created_at,
 	updated_at: token.updated_at,
 	last_used_at: token.last_used_at,
@@ -620,9 +621,9 @@ export async function RevokeWorkerAuthToken(
 	};
 }
 
-export async function SetWorkerAuthTokenEnabled(
+export async function SetWorkerEnabled(
 	workerID: string,
-	isEnabled: boolean
+	acceptsJobs: boolean
 ): Promise<WorkerAuthTokenActionResultType> {
 	const normalizedWorkerID = String(workerID ?? '').trim();
 	const validationError = validateWorkerIDForTokenAction(normalizedWorkerID);
@@ -634,24 +635,28 @@ export async function SetWorkerAuthTokenEnabled(
 	}
 
 	const record = await DatabaseUpdateWorkerAuthToken(normalizedWorkerID, {
-		is_enabled: isEnabled,
+		accepts_jobs: acceptsJobs,
 		updated_at: Date.now(),
 	});
 
 	if (!record) {
 		return {
 			ok: false,
-			message: `Could not ${isEnabled ? 'enable' : 'disable'} worker token.`,
+			message: `Could not ${acceptsJobs ? 'enable' : 'disable'} worker.`,
 		};
 	}
 
-	if (!isEnabled) {
-		disconnectWorkerWithToken(normalizedWorkerID, 'disable');
+	const worker = GetWorkerWithID(normalizedWorkerID);
+	if (worker) {
+		worker.data.acceptsJobs = acceptsJobs;
+		if (acceptsJobs) {
+			await WorkerForAvailableJobs(normalizedWorkerID);
+		}
 	}
 
 	return {
 		ok: true,
-		message: `Worker token ${isEnabled ? 'enabled' : 'disabled'}.`,
+		message: `Worker ${acceptsJobs ? 'enabled' : 'disabled'}.`,
 	};
 }
 
@@ -718,13 +723,6 @@ export async function RequireWorkerHttpAuth(req: Request, res: Response, next: N
 		if (!isAuthenticated) {
 			workerHttpAuthFailures.recordFailure(rateLimitKey);
 			logger.warn(`[auth] Rejected worker HTTP request from '${workerID}' with invalid token.`);
-			res.status(401).send('Authentication required.');
-			return;
-		}
-
-		if (!tokenRecord.is_enabled) {
-			workerHttpAuthFailures.recordFailure(rateLimitKey);
-			logger.warn(`[auth] Rejected worker HTTP request from '${workerID}' with disabled token.`);
 			res.status(401).send('Authentication required.');
 			return;
 		}
@@ -819,14 +817,8 @@ export function AuthenticateWorkerSocket(socket: Socket, next: (err?: ExtendedEr
 			return;
 		}
 
-		if (!tokenRecord.is_enabled) {
-			workerSocketAuthFailures.recordFailure(rateLimitKey);
-			logger.warn(`[socket] Rejected worker '${workerID}' with disabled token.`);
-			next(new Error('unauthorized'));
-			return;
-		}
-
 		workerSocketAuthFailures.reset(rateLimitKey);
+		socket.data.acceptsJobs = tokenRecord.accepts_jobs;
 		await DatabaseUpdateWorkerAuthToken(workerID, { last_used_at: Date.now() });
 		EmitToAllClients('worker-auth-tokens-update', await GetWorkerAuthTokenRecords());
 		next();

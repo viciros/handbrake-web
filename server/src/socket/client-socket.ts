@@ -29,7 +29,7 @@ import {
 	GetWorkerAuthTokenRecords,
 	RevokeWorkerAuthToken,
 	RotateWorkerAuthToken,
-	SetWorkerAuthTokenEnabled,
+	SetWorkerEnabled,
 	UpdateClientAuthCredentials,
 } from 'scripts/auth';
 import { GetConfig, WriteConfig } from 'scripts/config/config';
@@ -197,21 +197,21 @@ export default function ClientSocket(io: Server) {
 		);
 
 		socket.on(
-			'set-worker-auth-token-enabled',
+			'set-worker-enabled',
 			async (
 				workerID: string,
-				isEnabled: boolean,
+				acceptsJobs: boolean,
 				callback?: (result: WorkerAuthTokenActionResultType) => void
 			) => {
 				try {
-					const result = await SetWorkerAuthTokenEnabled(workerID, isEnabled);
+					const result = await SetWorkerEnabled(workerID, acceptsJobs);
 					callback?.(result);
 					if (result.ok) await emitWorkerAuthTokensUpdate();
 				} catch (err) {
-					logClientSocketError(socket.id, 'could not update worker auth token state', err);
+					logClientSocketError(socket.id, 'could not update worker state', err);
 					callback?.({
 						ok: false,
-						message: 'Could not update worker token.',
+						message: 'Could not update worker.',
 					});
 				}
 			}

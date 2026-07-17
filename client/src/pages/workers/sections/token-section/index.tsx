@@ -143,27 +143,17 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 		);
 	};
 
-	const setTokenEnabled = (record: WorkerAuthTokenRecordType, isEnabled: boolean) => {
-		if (
-			!isEnabled &&
-			connectedWorkers.has(record.worker_id) &&
-			!window.confirm(
-				`Disable the token for '${record.worker_id}'? This will disconnect the worker.`
-			)
-		) {
-			return;
-		}
-
+	const setWorkerEnabled = (record: WorkerAuthTokenRecordType, acceptsJobs: boolean) => {
 		setMessage('');
 		socket.emit(
-			'set-worker-auth-token-enabled',
+			'set-worker-enabled',
 			record.worker_id,
-			isEnabled,
+			acceptsJobs,
 			(result: WorkerAuthTokenActionResultType) => {
 				setMessage(
 					result.message ||
 						(result.ok
-							? `Worker token ${isEnabled ? 'enabled' : 'disabled'}.`
+							? `Worker ${acceptsJobs ? 'enabled' : 'disabled'}.`
 							: 'Update failed.')
 				);
 			}
@@ -184,6 +174,10 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 
 	return (
 		<Section className={styles['token-section']} heading='Worker Tokens'>
+			<div className={styles['description']}>
+				Disabling a worker prevents new jobs without disconnecting it. Active jobs finish
+				before the worker becomes idle. Rotate or revoke a token to invalidate authentication.
+			</div>
 			<div className={styles['create-token']}>
 				<TextInput
 					className={styles['worker-id-input']}
@@ -213,12 +207,12 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 
 				{workerTokens.map((record) => {
 					const isOnline = connectedWorkers.has(record.worker_id);
-					const isEnabled = record.is_enabled;
+					const acceptsJobs = record.accepts_jobs;
 
 					return (
 						<div
 							className={styles['token-row']}
-							data-enabled={isEnabled}
+							data-enabled={acceptsJobs}
 							key={record.worker_id}
 						>
 							<div className={styles['identity']}>
@@ -226,8 +220,8 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 								<span className={styles['status']} data-online={isOnline}>
 									{isOnline ? 'Online' : 'Offline'}
 								</span>
-								<span className={styles['status']} data-enabled={isEnabled}>
-									{isEnabled ? 'Enabled' : 'Disabled'}
+								<span className={styles['status']} data-enabled={acceptsJobs}>
+									{acceptsJobs ? 'Enabled' : 'Disabled'}
 								</span>
 							</div>
 							<div className={styles['dates']}>
@@ -238,10 +232,10 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 							</div>
 							<div className={styles['actions']}>
 								<ButtonInput
-									label={isEnabled ? 'Disable' : 'Enable'}
-									Icon={isEnabled ? StopIcon : PlayIcon}
-									color={isEnabled ? 'orange' : 'green'}
-									onClick={() => setTokenEnabled(record, !isEnabled)}
+									label={acceptsJobs ? 'Disable' : 'Enable'}
+									Icon={acceptsJobs ? StopIcon : PlayIcon}
+									color={acceptsJobs ? 'orange' : 'green'}
+									onClick={() => setWorkerEnabled(record, !acceptsJobs)}
 								/>
 								<ButtonInput
 									label='Rotate'
