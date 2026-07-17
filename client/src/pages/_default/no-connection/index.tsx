@@ -1,15 +1,11 @@
 import Section from '~components/root/section';
 
-interface Properties {
-	url: string;
-}
-
-export default function NoConnection({ url }: Properties) {
+export default function NoConnection() {
 	return (
-		<Section heading='Error'>
+		<Section heading='Server Connection Offline'>
 			<p>
-				The client is unable to reach the server at {url}. Please check your server status
-				or configuration.
+				The Web UI cannot connect to the server. Check that the server is running and
+				reachable. It will reconnect automatically.
 			</p>
 		</Section>
 	);

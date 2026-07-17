@@ -203,7 +203,7 @@ export default function PrimaryLayout() {
 					{authStatus.must_change_credentials && <UpdateClientCredentials />}
 				</PrimaryContext>
 			) : (
-				<NoConnection url={serverURL} />
+				<NoConnection />
 			)}
 		</Fragment>
 	);
