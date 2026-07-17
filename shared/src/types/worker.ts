@@ -18,9 +18,9 @@ export interface WorkerCapabilities {
 export type WorkerPropertiesMap = Record<string, WorkerProperties>;
 
 export interface WorkerResourceUsage {
-	cpu_percent: number | null;
-	memory_used_bytes: number | null;
-	memory_limit_bytes: number | null;
+	host_cpu_percent: number | null;
+	host_memory_available_bytes: number | null;
+	host_memory_total_bytes: number | null;
 	sampled_at: number;
 }
 

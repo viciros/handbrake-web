@@ -32,26 +32,34 @@ export function GetWorkerResourceUsage() {
 const isNullableFiniteNumber = (value: unknown) =>
 	value === null || (typeof value == 'number' && Number.isFinite(value));
 
+const isNullableNonNegativeSafeInteger = (value: unknown) =>
+	value === null || (typeof value == 'number' && Number.isSafeInteger(value) && value >= 0);
+
 export function NormalizeWorkerResourceUsage(value: unknown): WorkerResourceUsage | undefined {
 	if (value == null || typeof value != 'object') return undefined;
 
 	const usage = value as Partial<WorkerResourceUsage>;
 	if (
-		!isNullableFiniteNumber(usage.cpu_percent) ||
-		!isNullableFiniteNumber(usage.memory_used_bytes) ||
-		!isNullableFiniteNumber(usage.memory_limit_bytes) ||
-		(typeof usage.cpu_percent == 'number' &&
-			(usage.cpu_percent < 0 || usage.cpu_percent > 100)) ||
-		(typeof usage.memory_used_bytes == 'number' && usage.memory_used_bytes < 0) ||
-		(typeof usage.memory_limit_bytes == 'number' && usage.memory_limit_bytes < 0)
+		!isNullableFiniteNumber(usage.host_cpu_percent) ||
+		!isNullableNonNegativeSafeInteger(usage.host_memory_available_bytes) ||
+		!isNullableNonNegativeSafeInteger(usage.host_memory_total_bytes) ||
+		(typeof usage.host_cpu_percent == 'number' &&
+			(usage.host_cpu_percent < 0 || usage.host_cpu_percent > 100)) ||
+		(usage.host_memory_available_bytes == null) !=
+			(usage.host_memory_total_bytes == null) ||
+		(typeof usage.host_memory_total_bytes == 'number' &&
+			usage.host_memory_total_bytes <= 0) ||
+		(typeof usage.host_memory_available_bytes == 'number' &&
+			typeof usage.host_memory_total_bytes == 'number' &&
+			usage.host_memory_available_bytes > usage.host_memory_total_bytes)
 	) {
 		return undefined;
 	}
 
 	return {
-		cpu_percent: usage.cpu_percent ?? null,
-		memory_used_bytes: usage.memory_used_bytes ?? null,
-		memory_limit_bytes: usage.memory_limit_bytes ?? null,
+		host_cpu_percent: usage.host_cpu_percent ?? null,
+		host_memory_available_bytes: usage.host_memory_available_bytes ?? null,
+		host_memory_total_bytes: usage.host_memory_total_bytes ?? null,
 		sampled_at: Date.now(),
 	};
 }

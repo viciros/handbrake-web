@@ -101,14 +101,19 @@ export default function WorkerSocket(io: Server) {
 
 		socket.on('disconnect', cleanupWorker);
 		AddWorker(socket);
+		let didWarnInvalidResourceUsage = false;
 		socket.on('resource-usage', (value: unknown) => {
 			const usage = NormalizeWorkerResourceUsage(value);
 			if (!usage) {
-				logger.warn(
-					`[socket] [warn] Ignoring invalid resource usage from worker '${workerID}'.`
-				);
+				if (!didWarnInvalidResourceUsage) {
+					logger.warn(
+						`[socket] [warn] Ignoring invalid resource usage from worker '${workerID}'.`
+					);
+					didWarnInvalidResourceUsage = true;
+				}
 				return;
 			}
+			didWarnInvalidResourceUsage = false;
 			SetWorkerResourceUsage(workerID, usage);
 		});
 

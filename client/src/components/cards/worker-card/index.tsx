@@ -1,3 +1,4 @@
+import { CalculateMemoryAvailablePercent } from '@handbrake-web/shared/funcs/resource.funcs';
 import { WorkerCapabilities } from '@handbrake-web/shared/types/worker';
 import { HTMLAttributes } from 'react';
 import TextInfo from '~components/base/info/text-info';
@@ -29,9 +30,10 @@ const formatBytes = (bytes: number) => {
 	return `${value.toFixed(unitIndex == 0 ? 0 : 1)} ${units[unitIndex]}`;
 };
 
-const formatMemoryUsage = (used: number | null, limit: number | null) => {
-	if (used == null) return 'Unavailable';
-	return limit == null ? formatBytes(used) : `${formatBytes(used)} / ${formatBytes(limit)}`;
+const formatHostMemoryAvailable = (available: number | null, total: number | null) => {
+	const percentage = CalculateMemoryAvailablePercent(available, total);
+	if (percentage == null || available == null || total == null) return 'Unavailable';
+	return `${percentage.toFixed(1)}% free (${formatBytes(available)} / ${formatBytes(total)})`;
 };
 
 export default function WorkerCard({ worker, info, className, ...properties }: Properties) {
@@ -43,20 +45,20 @@ export default function WorkerCard({ worker, info, className, ...properties }: P
 			<h3 className={styles['heading']}>{worker}</h3>
 			<div className={styles['body']}>
 				<div className={styles['subsection']}>
-					<h5 className={styles['subheading']}>Resource Usage</h5>
+					<h5 className={styles['subheading']}>Host Resource Usage</h5>
 					<div className={styles['content']}>
-						<TextInfo className={styles['text-info']} label='CPU Usage'>
+						<TextInfo className={styles['text-info']} label='Host CPU Usage'>
 							{resourceUsage
-								? resourceUsage.cpu_percent == null
+								? resourceUsage.host_cpu_percent == null
 									? 'Unavailable'
-									: `${resourceUsage.cpu_percent.toFixed(1)}%`
+									: `${resourceUsage.host_cpu_percent.toFixed(1)}%`
 								: 'Collecting'}
 						</TextInfo>
-						<TextInfo className={styles['text-info']} label='RAM Usage'>
+						<TextInfo className={styles['text-info']} label='Host Memory Available'>
 							{resourceUsage
-								? formatMemoryUsage(
-										resourceUsage.memory_used_bytes,
-										resourceUsage.memory_limit_bytes
+								? formatHostMemoryAvailable(
+										resourceUsage.host_memory_available_bytes,
+										resourceUsage.host_memory_total_bytes
 								  )
 								: 'Collecting'}
 						</TextInfo>

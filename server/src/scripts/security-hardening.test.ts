@@ -440,16 +440,46 @@ test('falls back to a sixty-second watcher quiet period for invalid configuratio
 test('validates worker resource usage before relaying it to clients', async () => {
 	const { NormalizeWorkerResourceUsage } = await import('./properties');
 
-	assert.equal(NormalizeWorkerResourceUsage({ cpu_percent: 101 }), undefined);
-	assert.equal(NormalizeWorkerResourceUsage({ memory_used_bytes: -1 }), undefined);
+	assert.equal(
+		NormalizeWorkerResourceUsage({
+			host_cpu_percent: 101,
+			host_memory_available_bytes: null,
+			host_memory_total_bytes: null,
+		}),
+		undefined
+	);
+	assert.equal(
+		NormalizeWorkerResourceUsage({
+			host_cpu_percent: 25,
+			host_memory_available_bytes: 2048,
+			host_memory_total_bytes: 1024,
+		}),
+		undefined
+	);
+	assert.equal(
+		NormalizeWorkerResourceUsage({
+			host_cpu_percent: 25,
+			host_memory_available_bytes: 1024,
+			host_memory_total_bytes: null,
+		}),
+		undefined
+	);
+	assert.equal(
+		NormalizeWorkerResourceUsage({
+			cpu_percent: 25,
+			memory_used_bytes: 1024,
+			memory_limit_bytes: 2048,
+		}),
+		undefined
+	);
 	const usage = NormalizeWorkerResourceUsage({
-		cpu_percent: 25.5,
-		memory_used_bytes: 1024,
-		memory_limit_bytes: null,
+		host_cpu_percent: 25.5,
+		host_memory_available_bytes: 1024,
+		host_memory_total_bytes: 2048,
 	});
-	assert.equal(usage?.cpu_percent, 25.5);
-	assert.equal(usage?.memory_used_bytes, 1024);
-	assert.equal(usage?.memory_limit_bytes, null);
+	assert.equal(usage?.host_cpu_percent, 25.5);
+	assert.equal(usage?.host_memory_available_bytes, 1024);
+	assert.equal(usage?.host_memory_total_bytes, 2048);
 	assert.equal(typeof usage?.sampled_at, 'number');
 });
 
