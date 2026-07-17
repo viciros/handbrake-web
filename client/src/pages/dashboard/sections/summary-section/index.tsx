@@ -3,19 +3,17 @@ import Section from '~components/root/section';
 import styles from './styles.module.scss';
 
 interface Properties {
-	connectionStatus: boolean;
+	onlineWorkerCount: number;
 	queueStatus: QueueStatus;
 }
 
-export default function SummarySection({ connectionStatus, queueStatus }: Properties) {
+export default function SummarySection({ onlineWorkerCount, queueStatus }: Properties) {
 	return (
 		<Section className={styles['summary']} heading='Summary'>
 			<div className={styles['info']}>
-				<div className={`${styles['status']} ${styles['connection']}`}>
-					<span>Server: </span>
-					<strong data-connected={connectionStatus}>
-						{connectionStatus ? 'Connected' : 'Disconnected'}
-					</strong>
+				<div className={`${styles['status']} ${styles['workers']}`}>
+					<span>Online Workers: </span>
+					<strong data-online={onlineWorkerCount > 0}>{onlineWorkerCount}</strong>
 				</div>
 				<div className={`${styles['status']} ${styles['queue']}`}>
 					<span>Queue: </span>

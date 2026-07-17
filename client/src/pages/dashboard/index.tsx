@@ -10,7 +10,6 @@ import styles from './styles.module.scss';
 
 export default function DashboardSection() {
 	const {
-		socket,
 		queue,
 		queueStatus,
 		presets,
@@ -22,7 +21,10 @@ export default function DashboardSection() {
 
 	return (
 		<Page className={styles['dashboard']} heading='Dashboard'>
-			<SummarySection connectionStatus={socket.connected} queueStatus={queueStatus} />
+			<SummarySection
+				onlineWorkerCount={connections.workers.length}
+				queueStatus={queueStatus}
+			/>
 			<QueueSection queue={queue} />
 			<PresetsSection presets={presets} />
 			<WatchersSection watchers={watchers} />
