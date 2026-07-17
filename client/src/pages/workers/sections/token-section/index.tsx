@@ -29,8 +29,13 @@ type Props = {
 	workerTokens: WorkerAuthTokenRecordType[];
 };
 
-const formatTimestamp = (timestamp: number | null) =>
-	timestamp ? new Date(timestamp).toLocaleString() : 'Never';
+const formatTimestamp = (timestamp: number | null) => {
+	if (!timestamp) return 'Never';
+	return new Date(timestamp).toLocaleString(undefined, {
+		dateStyle: 'short',
+		timeStyle: 'short',
+	});
+};
 
 const copyTextFallback = (text: string) => {
 	const textarea = document.createElement('textarea');
