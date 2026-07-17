@@ -16,7 +16,6 @@ interface Properties {
 
 export default function WorkersSection({ queue, workers, properties, workerTokens }: Properties) {
 	const onlineWorkerIDs = new Set(workers.map((worker) => worker.workerID));
-	const workerTokensByID = new Map(workerTokens.map((token) => [token.worker_id, token]));
 	const workerIDs = [
 		...new Set([...workerTokens.map((token) => token.worker_id), ...onlineWorkerIDs]),
 	].sort((a, b) => a.localeCompare(b));
@@ -31,14 +30,12 @@ export default function WorkersSection({ queue, workers, properties, workerToken
 						<th>HandBrake Version</th>
 						<th>Capabilities</th>
 						<th>Connection</th>
-						<th>Scheduling</th>
 						<th>Activity</th>
 					</tr>
 				</thead>
 				<tbody>
 					{workerIDs.map((workerID) => {
 						const isOnline = onlineWorkerIDs.has(workerID);
-						const acceptsJobs = workerTokensByID.get(workerID)?.accepts_jobs !== false;
 						const isWorking =
 							isOnline &&
 							queue.some(
@@ -76,11 +73,6 @@ export default function WorkersSection({ queue, workers, properties, workerToken
 								<td align='center'>
 									<span className={styles['status']} data-online={isOnline}>
 										{isOnline ? 'Online' : 'Offline'}
-									</span>
-								</td>
-								<td align='center'>
-									<span className={styles['status']} data-enabled={acceptsJobs}>
-										{acceptsJobs ? 'Enabled' : 'Disabled'}
 									</span>
 								</td>
 								<td

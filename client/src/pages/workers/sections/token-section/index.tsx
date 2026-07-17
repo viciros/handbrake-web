@@ -3,6 +3,8 @@ import type {
 	WorkerAuthTokenRecordType,
 	WorkerAuthTokenSecretResultType,
 } from '@handbrake-web/shared/types/auth';
+import type { QueueType } from '@handbrake-web/shared/types/queue';
+import { IsActiveTranscodeStage } from '@handbrake-web/shared/types/transcode';
 import RotateIcon from '@icons/arrow-clockwise.svg?react';
 import ClipboardIcon from '@icons/clipboard.svg?react';
 import PlayIcon from '@icons/play-fill.svg?react';
@@ -25,12 +27,14 @@ type TokenSecret = {
 
 type Props = {
 	connectedWorkerIDs: string[];
+	queue: QueueType;
 	socket: Socket;
 	workerTokens: WorkerAuthTokenRecordType[];
 };
 
 type TokenRowProps = {
 	acceptsJobs: boolean;
+	activity: 'Idle' | 'N/A' | 'Working';
 	isOnline: boolean;
 	lastUsedAt: number | null;
 	onRevoke: (workerID: string) => void;
@@ -81,6 +85,7 @@ const copyText = async (text: string) => {
 
 const TokenRow = memo(function TokenRow({
 	acceptsJobs,
+	activity,
 	isOnline,
 	lastUsedAt,
 	onRevoke,
@@ -95,15 +100,20 @@ const TokenRow = memo(function TokenRow({
 				<span className={styles['status']} data-online={isOnline}>
 					{isOnline ? 'Online' : 'Offline'}
 				</span>
-				<span className={styles['status']} data-enabled={acceptsJobs}>
-					{acceptsJobs ? 'Enabled' : 'Disabled'}
-				</span>
 			</div>
 			<div className={styles['dates']}>
 				<div>
 					<span>Last Online</span>
 					<strong>{formatTimestamp(lastUsedAt)}</strong>
 				</div>
+			</div>
+			<div className={styles['activity']}>
+				<span>Activity</span>
+				<strong
+					data-working={activity == 'N/A' ? undefined : activity == 'Working'}
+				>
+					{activity}
+				</strong>
 			</div>
 			<div className={styles['actions']}>
 				<ButtonInput
@@ -129,7 +139,7 @@ const TokenRow = memo(function TokenRow({
 	);
 });
 
-export default function TokenSection({ connectedWorkerIDs, socket, workerTokens }: Props) {
+export default function TokenSection({ connectedWorkerIDs, queue, socket, workerTokens }: Props) {
 	const [workerID, setWorkerID] = useState('');
 	const [message, setMessage] = useState('');
 	const [isSaving, setIsSaving] = useState(false);
@@ -137,6 +147,16 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 	const [copyMessage, setCopyMessage] = useState('');
 
 	const connectedWorkers = useMemo(() => new Set(connectedWorkerIDs), [connectedWorkerIDs]);
+	const activeWorkers = useMemo(
+		() =>
+			new Set(
+				queue
+					.filter((job) => IsActiveTranscodeStage(job.transcode_stage))
+					.map((job) => job.worker_id)
+					.filter((workerID): workerID is string => workerID != null)
+			),
+		[queue]
+	);
 	const trimmedWorkerID = workerID.trim();
 
 	const handleSecretResult = useCallback(
@@ -252,9 +272,7 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 		<Section className={styles['token-section']} heading='Worker Tokens'>
 			<div className={styles['description']}>
 				The Worker ID must exactly match the worker's <code>WORKER_ID</code> environment
-				variable. Disabling a worker prevents new jobs without disconnecting it. Active jobs
-				finish before the worker becomes idle. Rotate or revoke a token to invalidate
-				authentication.
+				variable. Rotate or revoke a token to invalidate authentication.
 			</div>
 			<div className={styles['create-token']}>
 				<TextInput
@@ -288,6 +306,13 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 				{workerTokens.map((record) => (
 					<TokenRow
 						acceptsJobs={record.accepts_jobs}
+						activity={
+							!connectedWorkers.has(record.worker_id)
+								? 'N/A'
+								: activeWorkers.has(record.worker_id)
+									? 'Working'
+									: 'Idle'
+						}
 						isOnline={connectedWorkers.has(record.worker_id)}
 						key={record.worker_id}
 						lastUsedAt={record.last_used_at}

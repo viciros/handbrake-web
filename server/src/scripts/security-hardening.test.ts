@@ -7,6 +7,7 @@ import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import test, { before } from 'node:test';
 import { QueueStartupBehavior } from '@handbrake-web/shared/types/config';
+import { TranscodeStage } from '@handbrake-web/shared/types/transcode';
 
 let testRoot = '';
 let videoPath = '';
@@ -144,7 +145,7 @@ test('validates worker IDs', async () => {
 	assert.equal(IsValidWorkerID('x'.repeat(65)), false);
 });
 
-test('creates, verifies, rotates, and revokes worker tokens', async () => {
+test('creates, disables, enables, verifies, rotates, and revokes worker tokens', async () => {
 	const {
 		AuthenticateWorkerSocket,
 		CreateWorkerAuthToken,
@@ -153,6 +154,12 @@ test('creates, verifies, rotates, and revokes worker tokens', async () => {
 		SetWorkerEnabled,
 		VerifySecretHash,
 	} = await import('./auth');
+	const { AddWorker, RemoveWorker } = await import('./connections');
+	const {
+		DatabaseGetJobStatusByIDOrUndefined,
+		DatabaseInsertJob,
+		DatabaseUpdateJobStatus,
+	} = await import('./database/database-queue');
 	const { DatabaseGetWorkerAuthToken } = await import('./database/database-worker-auth');
 	const workerID = 'worker-token-test';
 
@@ -168,8 +175,39 @@ test('creates, verifies, rotates, and revokes worker tokens', async () => {
 	assert.equal(await VerifySecretHash(created.token, storedCreatedToken.token_hash), true);
 	assert.equal(await VerifySecretHash('wrong token', storedCreatedToken.token_hash), false);
 
+	let wasDisconnected = false;
+	let stoppedJobID: number | undefined;
+	const activeJobID = await DatabaseInsertJob({
+		input_path: path.join(videoPath, 'active-worker-input.mkv'),
+		output_path: path.join(videoPath, 'active-worker-output.mkv'),
+		preset_category: 'General',
+		preset_id: 'Fast 1080p30',
+	});
+	await DatabaseUpdateJobStatus(activeJobID, {
+		transcode_stage: TranscodeStage.Transcoding,
+		worker_id: workerID,
+	});
+	const connectedWorker = {
+		data: { acceptsJobs: true },
+		disconnect: (close: boolean) => {
+			wasDisconnected = close;
+		},
+		handshake: { query: { workerID } },
+		timeout: () => ({
+			emitWithAck: async (_event: string, jobID: number) => {
+				stoppedJobID = jobID;
+			},
+		}),
+	};
+	AddWorker(connectedWorker as never);
 	const disabled = await SetWorkerEnabled(workerID, false);
+	RemoveWorker(connectedWorker as never);
 	assert.equal(disabled.ok, true);
+	assert.equal(wasDisconnected, true);
+	assert.equal(stoppedJobID, activeJobID);
+	const stoppedJob = await DatabaseGetJobStatusByIDOrUndefined(activeJobID);
+	assert.equal(stoppedJob?.transcode_stage, TranscodeStage.Stopped);
+	assert.equal(stoppedJob?.worker_id, null);
 	const storedDisabledToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedDisabledToken);
 	assert.equal(storedDisabledToken.accepts_jobs, false);
@@ -183,19 +221,28 @@ test('creates, verifies, rotates, and revokes worker tokens', async () => {
 		},
 		conn: { remoteAddress: 'paused-worker-test' },
 	};
-	await new Promise<void>((resolve, reject) => {
-		AuthenticateWorkerSocket(pausedWorkerSocket as never, (err) => {
-			if (err) reject(err);
-			else resolve();
-		});
-	});
-	assert.equal((pausedWorkerSocket.data as { acceptsJobs?: boolean }).acceptsJobs, false);
+	await assert.rejects(
+		new Promise<void>((resolve, reject) => {
+			AuthenticateWorkerSocket(pausedWorkerSocket as never, (err) => {
+				if (err) reject(err);
+				else resolve();
+			});
+		}),
+		/worker disabled/
+	);
 
 	const enabled = await SetWorkerEnabled(workerID, true);
 	assert.equal(enabled.ok, true);
 	const storedEnabledToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedEnabledToken);
 	assert.equal(storedEnabledToken.accepts_jobs, true);
+	await new Promise<void>((resolve, reject) => {
+		AuthenticateWorkerSocket(pausedWorkerSocket as never, (err) => {
+			if (err) reject(err);
+			else resolve();
+		});
+	});
+	assert.equal((pausedWorkerSocket.data as { acceptsJobs?: boolean }).acceptsJobs, true);
 
 	const rotated = await RotateWorkerAuthToken(workerID);
 	assert.equal(rotated.ok, true);

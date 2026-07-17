@@ -7,6 +7,7 @@ import type {
 	WorkerAuthTokenSecretResultType,
 } from '@handbrake-web/shared/types/auth';
 import type { ClientAuthType, WorkerAuthTokenType } from '@handbrake-web/shared/types/database';
+import { IsActiveTranscodeStage } from '@handbrake-web/shared/types/transcode';
 import type { NextFunction, Request, Response } from 'express';
 import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { ExtendedError, Socket } from 'socket.io';
@@ -25,7 +26,7 @@ import {
 	DatabaseInsertWorkerAuthToken,
 	DatabaseUpdateWorkerAuthToken,
 } from 'scripts/database/database-worker-auth';
-import { WorkerForAvailableJobs } from 'scripts/queue';
+import { GetQueue, StopJob, WorkerForAvailableJobs } from 'scripts/queue';
 
 type Credentials = {
 	username: string;
@@ -651,12 +652,22 @@ export async function SetWorkerEnabled(
 		worker.data.acceptsJobs = acceptsJobs;
 		if (acceptsJobs) {
 			await WorkerForAvailableJobs(normalizedWorkerID);
+		} else {
+			const activeJob = (await GetQueue()).find(
+				(job) =>
+					job.worker_id == normalizedWorkerID &&
+					IsActiveTranscodeStage(job.transcode_stage)
+			);
+			if (activeJob) {
+				await StopJob(activeJob.job_id);
+			}
+			disconnectWorkerWithToken(normalizedWorkerID, 'disable');
 		}
 	}
 
 	return {
 		ok: true,
-		message: `Worker ${acceptsJobs ? 'enabled' : 'disabled'}.`,
+		message: acceptsJobs ? 'Worker enabled.' : 'Worker disabled and disconnected.',
 	};
 }
 
@@ -724,6 +735,12 @@ export async function RequireWorkerHttpAuth(req: Request, res: Response, next: N
 			workerHttpAuthFailures.recordFailure(rateLimitKey);
 			logger.warn(`[auth] Rejected worker HTTP request from '${workerID}' with invalid token.`);
 			res.status(401).send('Authentication required.');
+			return;
+		}
+
+		if (!tokenRecord.accepts_jobs) {
+			workerHttpAuthFailures.reset(rateLimitKey);
+			res.status(403).send('Worker is disabled.');
 			return;
 		}
 
@@ -817,8 +834,14 @@ export function AuthenticateWorkerSocket(socket: Socket, next: (err?: ExtendedEr
 			return;
 		}
 
+		if (!tokenRecord.accepts_jobs) {
+			workerSocketAuthFailures.reset(rateLimitKey);
+			next(new Error('worker disabled'));
+			return;
+		}
+
 		workerSocketAuthFailures.reset(rateLimitKey);
-		socket.data.acceptsJobs = tokenRecord.accepts_jobs;
+		socket.data.acceptsJobs = true;
 		await DatabaseUpdateWorkerAuthToken(workerID, { last_used_at: Date.now() });
 		EmitToAllClients('worker-auth-tokens-update', await GetWorkerAuthTokenRecords());
 		next();

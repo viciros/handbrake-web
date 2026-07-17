@@ -14,13 +14,11 @@
 		background-color: var(--background-four);
 		color: var(--text-tertiary);
 
-		&[data-online='true'],
-		&[data-enabled='true'] {
+		&[data-online='true'] {
 			color: var(--handbrake-green-text);
 		}
 
-		&[data-online='false'],
-		&[data-enabled='false'] {
+		&[data-online='false'] {
 			color: var(--handbrake-orange);
 		}
 	}
