@@ -1,6 +1,9 @@
 import { statusSorting } from '@handbrake-web/shared/dict/queue.dict';
 import type { QueueType } from '@handbrake-web/shared/types/queue';
 import { IsActiveTranscodeStage, TranscodeStage } from '@handbrake-web/shared/types/transcode';
+import CaretDownIcon from '@icons/caret-down-fill.svg?react';
+import CaretUpIcon from '@icons/caret-up-fill.svg?react';
+import { useState } from 'react';
 import BadgeInfo from '~components/base/info/badge-info';
 import ProgressBar from '~components/base/progress';
 import Section from '~components/root/section';
@@ -112,6 +115,7 @@ function QueueTable({ jobs, timeHeading, formatTime, showProgress }: QueueTableP
 }
 
 export default function QueueSection({ queue }: Properties) {
+	const [isFinishedCollapsed, setIsFinishedCollapsed] = useState(true);
 	const queuedJobs = sortQueueJobs(
 		queue.filter((job) => job.transcode_stage != TranscodeStage.Finished)
 	);
@@ -129,13 +133,27 @@ export default function QueueSection({ queue }: Properties) {
 					showProgress={true}
 				/>
 			</Section>
-			<Section className={styles['queue']} heading='Finished Transcodes' link='/queue'>
-				<QueueTable
-					jobs={finishedJobs}
-					timeHeading='Completed At'
-					formatTime={formatCompletedAt}
-					showProgress={false}
-				/>
+			<Section className={styles['queue']}>
+				<button
+					className={styles['collapsible-heading']}
+					type='button'
+					aria-expanded={!isFinishedCollapsed}
+					onClick={() => setIsFinishedCollapsed((isCollapsed) => !isCollapsed)}
+				>
+					<span>
+						Finished Transcodes
+						{isFinishedCollapsed && ` (${finishedJobs.length})`}
+					</span>
+					{isFinishedCollapsed ? <CaretDownIcon /> : <CaretUpIcon />}
+				</button>
+				{!isFinishedCollapsed && (
+					<QueueTable
+						jobs={finishedJobs}
+						timeHeading='Completed At'
+						formatTime={formatCompletedAt}
+						showProgress={false}
+					/>
+				)}
 			</Section>
 		</>
 	);
