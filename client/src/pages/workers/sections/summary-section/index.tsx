@@ -14,7 +14,7 @@ export default function SummarySection({ workerInfo, queue }: Params) {
 		<Section className={styles['summary-section']} heading='Summary'>
 			<div className={styles['summary-info']}>
 				<div className={`${styles['info']} ${styles['total']}`}>
-					<span>Total Workers: </span>
+					<span>Online Workers: </span>
 					<span>{Object.keys(workerInfo).length}</span>
 				</div>
 				<div className={`${styles['info']} ${styles['idle']}`}>
