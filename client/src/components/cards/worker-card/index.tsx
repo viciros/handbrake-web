@@ -18,13 +18,50 @@ const capabilitiesLookup: Record<keyof WorkerCapabilities, string> = {
 };
 const getCapabilitiesLabel = (supported: boolean) => (supported ? 'Supported' : 'Unsupported');
 
+const formatBytes = (bytes: number) => {
+	const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+	let value = bytes;
+	let unitIndex = 0;
+	while (value >= 1024 && unitIndex < units.length - 1) {
+		value /= 1024;
+		unitIndex += 1;
+	}
+	return `${value.toFixed(unitIndex == 0 ? 0 : 1)} ${units[unitIndex]}`;
+};
+
+const formatMemoryUsage = (used: number | null, limit: number | null) => {
+	if (used == null) return 'Unavailable';
+	return limit == null ? formatBytes(used) : `${formatBytes(used)} / ${formatBytes(limit)}`;
+};
+
 export default function WorkerCard({ worker, info, className, ...properties }: Properties) {
 	const workerProperties = info.properties;
+	const resourceUsage = info.resourceUsage;
 
 	return (
 		<div className={`worker-card ${styles['worker-card']} ${className || ''}`} {...properties}>
 			<h3 className={styles['heading']}>{worker}</h3>
 			<div className={styles['body']}>
+				<div className={styles['subsection']}>
+					<h5 className={styles['subheading']}>Resource Usage</h5>
+					<div className={styles['content']}>
+						<TextInfo className={styles['text-info']} label='CPU Usage'>
+							{resourceUsage
+								? resourceUsage.cpu_percent == null
+									? 'Unavailable'
+									: `${resourceUsage.cpu_percent.toFixed(1)}%`
+								: 'Collecting'}
+						</TextInfo>
+						<TextInfo className={styles['text-info']} label='RAM Usage'>
+							{resourceUsage
+								? formatMemoryUsage(
+										resourceUsage.memory_used_bytes,
+										resourceUsage.memory_limit_bytes
+								  )
+								: 'Collecting'}
+						</TextInfo>
+					</div>
+				</div>
 				<div className={styles['subsection']}>
 					<h5 className={styles['subheading']}>Version Information</h5>
 					<div className={styles['content']}>

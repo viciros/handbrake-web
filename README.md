@@ -96,7 +96,9 @@ Create a token for each worker on the Workers page, then put the one-time token 
 
 Workers retry server connections indefinitely with capped backoff, including after authentication failures and server-requested disconnects. Disabling a worker in the web UI only prevents it from receiving new jobs: it stays connected and finishes any active job. Rotate or revoke its token when you need to invalidate authentication.
 
-Watch folders wait until a file's size and modification time have both remained unchanged for 30 seconds before creating a job. Set `HANDBRAKE_WATCHER_STABILITY_SECONDS` on the server to change this quiet period for slower or faster storage.
+Workers report container CPU and RAM usage to the Workers page every 10 seconds when Linux cgroup metrics are available.
+
+Watch folders wait until a file's size and modification time have both remained unchanged for 60 seconds before creating a job. Set `HANDBRAKE_WATCHER_STABILITY_SECONDS` on the server to change this quiet period for slower or faster storage.
 
 ## Usage
 

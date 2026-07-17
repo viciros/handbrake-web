@@ -21,7 +21,13 @@ import {
 	DatabaseUpdateJobStatus,
 } from 'scripts/database/database-queue';
 import { GetDefaultPresetByName, GetPresetByName } from 'scripts/presets';
-import { AddWorkerProperties, RemoveWorkerProperties } from 'scripts/properties';
+import {
+	AddWorkerProperties,
+	NormalizeWorkerResourceUsage,
+	RemoveWorkerProperties,
+	RemoveWorkerResourceUsage,
+	SetWorkerResourceUsage,
+} from 'scripts/properties';
 import {
 	GetBusyWorkers,
 	GetQueue,
@@ -75,6 +81,7 @@ export default function WorkerSocket(io: Server) {
 
 			RemoveWorker(socket);
 			RemoveWorkerProperties(workerID);
+			RemoveWorkerResourceUsage(workerID);
 
 			const queue = await GetQueue();
 			const workersJob = queue.find(
@@ -94,6 +101,16 @@ export default function WorkerSocket(io: Server) {
 
 		socket.on('disconnect', cleanupWorker);
 		AddWorker(socket);
+		socket.on('resource-usage', (value: unknown) => {
+			const usage = NormalizeWorkerResourceUsage(value);
+			if (!usage) {
+				logger.warn(
+					`[socket] [warn] Ignoring invalid resource usage from worker '${workerID}'.`
+				);
+				return;
+			}
+			SetWorkerResourceUsage(workerID, usage);
+		});
 
 		const stopStaleWorkerJob = async (jobID: number) => {
 			try {

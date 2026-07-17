@@ -47,7 +47,7 @@ import {
 	RemovePreset,
 	RenamePreset,
 } from 'scripts/presets';
-import { GetWorkerProperties } from 'scripts/properties';
+import { GetWorkerProperties, GetWorkerResourceUsage } from 'scripts/properties';
 import {
 	AddJob,
 	ClearQueue,
@@ -79,6 +79,7 @@ const initClient = async (socket: Client) => {
 	socket.emit('default-presets-update', GetDefaultPresets());
 	socket.emit('queue-status-update', await GetQueueStatus());
 	socket.emit('properties-update', GetWorkerProperties());
+	socket.emit('worker-resource-usage-update', GetWorkerResourceUsage());
 	socket.emit('worker-auth-tokens-update', await GetWorkerAuthTokenRecords());
 	socket.emit('watchers-update', await DatabaseGetDetailedWatchers());
 };

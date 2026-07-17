@@ -1,5 +1,8 @@
 import { IsActiveTranscodeStage } from '@handbrake-web/shared/types/transcode';
-import { WorkerProperties } from '@handbrake-web/shared/types/worker';
+import {
+	WorkerProperties,
+	WorkerResourceUsage,
+} from '@handbrake-web/shared/types/worker';
 import { useContext } from 'react';
 import Page from '~components/root/page';
 import { PrimaryContext } from '~layouts/primary/context';
@@ -10,6 +13,7 @@ import styles from './styles.module.scss';
 
 export type WorkerInfo = {
 	properties?: WorkerProperties;
+	resourceUsage?: WorkerResourceUsage;
 	status: string;
 	job: string;
 	progress: string;
@@ -18,7 +22,8 @@ export type WorkerInfo = {
 export type WorkerInfoMap = Record<string, WorkerInfo>;
 
 export default function WorkersPage() {
-	const { connections, queue, properties, socket, workerTokens } = useContext(PrimaryContext)!;
+	const { connections, queue, properties, socket, workerResourceUsage, workerTokens } =
+		useContext(PrimaryContext)!;
 	const workerTokensByID = new Map(workerTokens.map((token) => [token.worker_id, token]));
 
 	const workerInfo: WorkerInfoMap = Object.fromEntries(
@@ -32,6 +37,7 @@ export default function WorkersPage() {
 				worker.workerID,
 				{
 					properties: properties[worker.workerID],
+					resourceUsage: workerResourceUsage[worker.workerID],
 					status: job ? 'Working' : acceptsJobs ? 'Idle' : 'Disabled',
 					job: job ? job.input_path : 'N/A',
 					progress:

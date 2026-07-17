@@ -41,7 +41,7 @@ export default function QueueSection({ queue }: Properties) {
 						<th>Output</th>
 						<th>Worker</th>
 						<th>Status</th>
-						<th>Time</th>
+						<th>Time Finished</th>
 						<th>Progress</th>
 					</tr>
 				</thead>

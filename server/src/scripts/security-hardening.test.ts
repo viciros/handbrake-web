@@ -429,12 +429,28 @@ test('cancels watched file readiness when aborted or deleted', async () => {
 	assert.equal(await deletedReadiness, false);
 });
 
-test('falls back to a thirty-second watcher quiet period for invalid configuration', async () => {
+test('falls back to a sixty-second watcher quiet period for invalid configuration', async () => {
 	const { GetWatcherStabilityMs } = await import('./watcher');
 
-	assert.equal(GetWatcherStabilityMs(undefined), 30_000);
-	assert.equal(GetWatcherStabilityMs('not-a-number'), 30_000);
+	assert.equal(GetWatcherStabilityMs(undefined), 60_000);
+	assert.equal(GetWatcherStabilityMs('not-a-number'), 60_000);
 	assert.equal(GetWatcherStabilityMs('12.5'), 12_500);
+});
+
+test('validates worker resource usage before relaying it to clients', async () => {
+	const { NormalizeWorkerResourceUsage } = await import('./properties');
+
+	assert.equal(NormalizeWorkerResourceUsage({ cpu_percent: 101 }), undefined);
+	assert.equal(NormalizeWorkerResourceUsage({ memory_used_bytes: -1 }), undefined);
+	const usage = NormalizeWorkerResourceUsage({
+		cpu_percent: 25.5,
+		memory_used_bytes: 1024,
+		memory_limit_bytes: null,
+	});
+	assert.equal(usage?.cpu_percent, 25.5);
+	assert.equal(usage?.memory_used_bytes, 1024);
+	assert.equal(usage?.memory_limit_bytes, null);
+	assert.equal(typeof usage?.sampled_at, 'number');
 });
 
 test('excludes workers that are not accepting jobs', async () => {

@@ -3,6 +3,7 @@ import logger from 'logging';
 import { GetWorkerProperties } from 'scripts/properties';
 import { Socket } from 'socket.io-client';
 import { ConnectionRetryController } from '../connection-retry';
+import { WorkerResourceUsageReporter } from '../scripts/resource-usage';
 import {
 	currentJobID,
 	isStartingTranscode,
@@ -16,8 +17,11 @@ import { serverAddress } from '../worker-startup';
 const workerID = process.env.WORKER_ID;
 
 export default function ServerSocket(server: Socket, retryController: ConnectionRetryController) {
+	const resourceUsageReporter = new WorkerResourceUsageReporter(server);
+
 	server.on('connect', () => {
 		retryController.connected();
+		resourceUsageReporter.start();
 		logger.info(`[socket] Connected to the server '${serverAddress}' with id '${server.id}'.`);
 	});
 
@@ -26,6 +30,7 @@ export default function ServerSocket(server: Socket, retryController: Connection
 	});
 
 	server.on('disconnect', (reason, details) => {
+		resourceUsageReporter.stop();
 		logger.info(`[socket] Disconnected from the server with reason '${reason}'.`);
 		retryController.failed(`Disconnected from the server with reason '${reason}'`, details);
 	});

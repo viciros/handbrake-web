@@ -7,7 +7,10 @@ import { DetailedWatcherType } from '@handbrake-web/shared/types/database';
 import { HandbrakePresetCategoryType } from '@handbrake-web/shared/types/preset';
 import { QueueStatus, QueueType } from '@handbrake-web/shared/types/queue';
 import { ConnectionIDsType } from '@handbrake-web/shared/types/socket';
-import { WorkerPropertiesMap } from '@handbrake-web/shared/types/worker';
+import {
+	WorkerPropertiesMap,
+	WorkerResourceUsageMap,
+} from '@handbrake-web/shared/types/worker';
 import { Outlet } from '@tanstack/react-router';
 import { Fragment, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
@@ -39,6 +42,7 @@ export default function PrimaryLayout() {
 		workers: [],
 	});
 	const [properties, setProperties] = useState<WorkerPropertiesMap>({});
+	const [workerResourceUsage, setWorkerResourceUsage] = useState<WorkerResourceUsageMap>({});
 	const [workerTokens, setWorkerTokens] = useState<WorkerAuthTokenRecordType[]>([]);
 	const [watchers, setWatchers] = useState<DetailedWatcherType[]>([]);
 	const [showSidebar, setShowSidebar] = useState(false);
@@ -126,6 +130,10 @@ export default function PrimaryLayout() {
 		setProperties(data);
 	};
 
+	const onWorkerResourceUsageUpdate = (data: WorkerResourceUsageMap) => {
+		setWorkerResourceUsage(data);
+	};
+
 	const onWorkerAuthTokensUpdate = (data: WorkerAuthTokenRecordType[]) => {
 		console.log(`[client] Worker auth tokens have been updated.`);
 		setWorkerTokens(data);
@@ -146,6 +154,7 @@ export default function PrimaryLayout() {
 		socket.on('default-presets-update', onDefaultPresetsUpdate);
 		socket.on('connections-update', onConnectionsUpdate);
 		socket.on('properties-update', onPropertiesUpdate);
+		socket.on('worker-resource-usage-update', onWorkerResourceUsageUpdate);
 		socket.on('worker-auth-tokens-update', onWorkerAuthTokensUpdate);
 		socket.on('watchers-update', onWatchersUpdate);
 
@@ -158,6 +167,7 @@ export default function PrimaryLayout() {
 			socket.off('default-presets-update', onDefaultPresetsUpdate);
 			socket.off('connections-update', onConnectionsUpdate);
 			socket.off('properties-update', onPropertiesUpdate);
+			socket.off('worker-resource-usage-update', onWorkerResourceUsageUpdate);
 			socket.off('worker-auth-tokens-update', onWorkerAuthTokensUpdate);
 			socket.off('watchers-update', onWatchersUpdate);
 		};
@@ -183,6 +193,7 @@ export default function PrimaryLayout() {
 						defaultPresets,
 						connections,
 						properties,
+						workerResourceUsage,
 						workerTokens,
 						config,
 						watchers,

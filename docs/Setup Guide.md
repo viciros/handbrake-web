@@ -125,11 +125,13 @@ Worker tokens authenticate workers to the server. HTTPS/TLS lets remote workers 
 
 Workers remain running and retry the server indefinitely with capped backoff when the server is unavailable, rejects authentication, or requests a disconnect. Disabling a worker in the Workers page prevents new job assignments without disconnecting it; an active job is allowed to finish. Rotate or revoke the worker token when you need to invalidate authentication.
 
-The server waits for watched files to have unchanged size and modification time for 30 seconds before adding them to the queue. Set `HANDBRAKE_WATCHER_STABILITY_SECONDS` in the server container environment to change the quiet period:
+Connected workers report container CPU and RAM usage to the Workers page every 10 seconds when Linux cgroup metrics are available.
+
+The server waits for watched files to have unchanged size and modification time for 60 seconds before adding them to the queue. Set `HANDBRAKE_WATCHER_STABILITY_SECONDS` in the server container environment to change the quiet period:
 
 ```yaml
 environment:
-  - HANDBRAKE_WATCHER_STABILITY_SECONDS=30
+  - HANDBRAKE_WATCHER_STABILITY_SECONDS=60
 ```
 
 ### Step 3 - Start Containers
