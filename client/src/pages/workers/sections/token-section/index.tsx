@@ -10,7 +10,7 @@ import PlusIcon from '@icons/plus-lg.svg?react';
 import StopIcon from '@icons/stop-fill.svg?react';
 import TrashIcon from '@icons/trash-fill.svg?react';
 import CloseIcon from '@icons/x-lg.svg?react';
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import ButtonInput from '~components/base/inputs/button';
 import TextInput from '~components/base/inputs/text';
@@ -27,6 +27,16 @@ type Props = {
 	connectedWorkerIDs: string[];
 	socket: Socket;
 	workerTokens: WorkerAuthTokenRecordType[];
+};
+
+type TokenRowProps = {
+	acceptsJobs: boolean;
+	isOnline: boolean;
+	lastUsedAt: number | null;
+	onRevoke: (workerID: string) => void;
+	onRotate: (workerID: string) => void;
+	onSetEnabled: (workerID: string, acceptsJobs: boolean) => void;
+	workerID: string;
 };
 
 const formatTimestamp = (timestamp: number | null) => {
@@ -69,6 +79,56 @@ const copyText = async (text: string) => {
 	return copyTextFallback(text);
 };
 
+const TokenRow = memo(function TokenRow({
+	acceptsJobs,
+	isOnline,
+	lastUsedAt,
+	onRevoke,
+	onRotate,
+	onSetEnabled,
+	workerID,
+}: TokenRowProps) {
+	return (
+		<div className={styles['token-row']}>
+			<div className={styles['identity']}>
+				<span className={styles['worker-id']}>{workerID}</span>
+				<span className={styles['status']} data-online={isOnline}>
+					{isOnline ? 'Online' : 'Offline'}
+				</span>
+				<span className={styles['status']} data-enabled={acceptsJobs}>
+					{acceptsJobs ? 'Enabled' : 'Disabled'}
+				</span>
+			</div>
+			<div className={styles['dates']}>
+				<div>
+					<span>Last Online</span>
+					<strong>{formatTimestamp(lastUsedAt)}</strong>
+				</div>
+			</div>
+			<div className={styles['actions']}>
+				<ButtonInput
+					label={acceptsJobs ? 'Disable' : 'Enable'}
+					Icon={acceptsJobs ? StopIcon : PlayIcon}
+					color={acceptsJobs ? 'orange' : 'green'}
+					onClick={() => onSetEnabled(workerID, !acceptsJobs)}
+				/>
+				<ButtonInput
+					label='Rotate Token'
+					Icon={RotateIcon}
+					color='blue'
+					onClick={() => onRotate(workerID)}
+				/>
+				<ButtonInput
+					label='Revoke'
+					Icon={TrashIcon}
+					color='red'
+					onClick={() => onRevoke(workerID)}
+				/>
+			</div>
+		</div>
+	);
+});
+
 export default function TokenSection({ connectedWorkerIDs, socket, workerTokens }: Props) {
 	const [workerID, setWorkerID] = useState('');
 	const [message, setMessage] = useState('');
@@ -79,22 +139,22 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 	const connectedWorkers = useMemo(() => new Set(connectedWorkerIDs), [connectedWorkerIDs]);
 	const trimmedWorkerID = workerID.trim();
 
-	const handleSecretResult = (
-		fallbackWorkerID: string,
-		result: WorkerAuthTokenSecretResultType
-	) => {
-		setIsSaving(false);
-		setMessage(result.message || (result.ok ? 'Worker token updated.' : 'Update failed.'));
+	const handleSecretResult = useCallback(
+		(fallbackWorkerID: string, result: WorkerAuthTokenSecretResultType) => {
+			setIsSaving(false);
+			setMessage(result.message || (result.ok ? 'Worker token updated.' : 'Update failed.'));
 
-		if (result.ok && result.token) {
-			setSecret({
-				workerID: result.record?.worker_id || fallbackWorkerID,
-				token: result.token,
-			});
-			setCopyMessage('');
-			setWorkerID('');
-		}
-	};
+			if (result.ok && result.token) {
+				setSecret({
+					workerID: result.record?.worker_id || fallbackWorkerID,
+					token: result.token,
+				});
+				setCopyMessage('');
+				setWorkerID('');
+			}
+		},
+		[]
+	);
 
 	const createToken = () => {
 		if (!trimmedWorkerID || isSaving) return;
@@ -110,60 +170,71 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 		);
 	};
 
-	const rotateToken = (record: WorkerAuthTokenRecordType) => {
-		if (
-			!window.confirm(
-				`Rotate the token for '${record.worker_id}'? This will disconnect the worker if it is online.`
-			)
-		) {
-			return;
-		}
-
-		setMessage('');
-		socket.emit(
-			'rotate-worker-auth-token',
-			record.worker_id,
-			(result: WorkerAuthTokenSecretResultType) => {
-				handleSecretResult(record.worker_id, result);
+	const rotateToken = useCallback(
+		(workerID: string) => {
+			if (
+				!window.confirm(
+					`Rotate the token for '${workerID}'? This will disconnect the worker if it is online.`
+				)
+			) {
+				return;
 			}
-		);
-	};
 
-	const revokeToken = (record: WorkerAuthTokenRecordType) => {
-		if (
-			!window.confirm(
-				`Revoke the token for '${record.worker_id}'? This will disconnect the worker if it is online.`
-			)
-		) {
-			return;
-		}
+			setMessage('');
+			socket.emit(
+				'rotate-worker-auth-token',
+				workerID,
+				(result: WorkerAuthTokenSecretResultType) => {
+					handleSecretResult(workerID, result);
+				}
+			);
+		},
+		[handleSecretResult, socket]
+	);
 
-		setMessage('');
-		socket.emit(
-			'revoke-worker-auth-token',
-			record.worker_id,
-			(result: WorkerAuthTokenActionResultType) => {
-				setMessage(result.message || (result.ok ? 'Worker token revoked.' : 'Update failed.'));
+	const revokeToken = useCallback(
+		(workerID: string) => {
+			if (
+				!window.confirm(
+					`Revoke the token for '${workerID}'? This will disconnect the worker if it is online.`
+				)
+			) {
+				return;
 			}
-		);
-	};
 
-	const setWorkerEnabled = (record: WorkerAuthTokenRecordType, acceptsJobs: boolean) => {
-		setMessage('');
-		socket.emit(
-			'set-worker-enabled',
-			record.worker_id,
-			acceptsJobs,
-			(result: WorkerAuthTokenActionResultType) => {
-				setMessage(
-					result.message ||
-						(result.ok
-							? `Worker ${acceptsJobs ? 'enabled' : 'disabled'}.`
-							: 'Update failed.')
-				);
-			}
-		);
-	};
+			setMessage('');
+			socket.emit(
+				'revoke-worker-auth-token',
+				workerID,
+				(result: WorkerAuthTokenActionResultType) => {
+					setMessage(
+						result.message || (result.ok ? 'Worker token revoked.' : 'Update failed.')
+					);
+				}
+			);
+		},
+		[socket]
+	);
+
+	const setWorkerEnabled = useCallback(
+		(workerID: string, acceptsJobs: boolean) => {
+			setMessage('');
+			socket.emit(
+				'set-worker-enabled',
+				workerID,
+				acceptsJobs,
+				(result: WorkerAuthTokenActionResultType) => {
+					setMessage(
+						result.message ||
+							(result.ok
+								? `Worker ${acceptsJobs ? 'enabled' : 'disabled'}.`
+								: 'Update failed.')
+					);
+				}
+			);
+		},
+		[socket]
+	);
 
 	const copySecret = () => {
 		if (!secret) return;
@@ -180,8 +251,10 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 	return (
 		<Section className={styles['token-section']} heading='Worker Tokens'>
 			<div className={styles['description']}>
-				Disabling a worker prevents new jobs without disconnecting it. Active jobs finish
-				before the worker becomes idle. Rotate or revoke a token to invalidate authentication.
+				The Worker ID must exactly match the worker's <code>WORKER_ID</code> environment
+				variable. Disabling a worker prevents new jobs without disconnecting it. Active jobs
+				finish before the worker becomes idle. Rotate or revoke a token to invalidate
+				authentication.
 			</div>
 			<div className={styles['create-token']}>
 				<TextInput
@@ -203,61 +276,27 @@ export default function TokenSection({ connectedWorkerIDs, socket, workerTokens 
 				/>
 			</div>
 
-			{message && <div className={styles['message']}>{message}</div>}
+			<div className={styles['message']} role='status' aria-live='polite'>
+				{message || '\u00a0'}
+			</div>
 
 			<div className={styles['tokens']}>
 				{workerTokens.length == 0 && (
 					<div className={styles['empty']}>No worker tokens have been created.</div>
 				)}
 
-				{workerTokens.map((record) => {
-					const isOnline = connectedWorkers.has(record.worker_id);
-					const acceptsJobs = record.accepts_jobs;
-
-					return (
-						<div
-							className={styles['token-row']}
-							data-enabled={acceptsJobs}
-							key={record.worker_id}
-						>
-							<div className={styles['identity']}>
-								<span className={styles['worker-id']}>{record.worker_id}</span>
-								<span className={styles['status']} data-online={isOnline}>
-									{isOnline ? 'Online' : 'Offline'}
-								</span>
-								<span className={styles['status']} data-enabled={acceptsJobs}>
-									{acceptsJobs ? 'Enabled' : 'Disabled'}
-								</span>
-							</div>
-							<div className={styles['dates']}>
-								<div>
-									<span>Last Online</span>
-									<strong>{formatTimestamp(record.last_used_at)}</strong>
-								</div>
-							</div>
-							<div className={styles['actions']}>
-								<ButtonInput
-									label={acceptsJobs ? 'Disable' : 'Enable'}
-									Icon={acceptsJobs ? StopIcon : PlayIcon}
-									color={acceptsJobs ? 'orange' : 'green'}
-									onClick={() => setWorkerEnabled(record, !acceptsJobs)}
-								/>
-								<ButtonInput
-									label='Rotate'
-									Icon={RotateIcon}
-									color='blue'
-									onClick={() => rotateToken(record)}
-								/>
-								<ButtonInput
-									label='Revoke'
-									Icon={TrashIcon}
-									color='red'
-									onClick={() => revokeToken(record)}
-								/>
-							</div>
-						</div>
-					);
-				})}
+				{workerTokens.map((record) => (
+					<TokenRow
+						acceptsJobs={record.accepts_jobs}
+						isOnline={connectedWorkers.has(record.worker_id)}
+						key={record.worker_id}
+						lastUsedAt={record.last_used_at}
+						onRevoke={revokeToken}
+						onRotate={rotateToken}
+						onSetEnabled={setWorkerEnabled}
+						workerID={record.worker_id}
+					/>
+				))}
 			</div>
 
 			{secret && (

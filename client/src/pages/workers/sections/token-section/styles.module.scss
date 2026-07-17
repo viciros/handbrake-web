@@ -17,6 +17,10 @@
 		color: var(--text-tertiary);
 	}
 
+	.message {
+		min-height: 1.25em;
+	}
+
 	.tokens {
 		display: flex;
 		flex-flow: column nowrap;
@@ -36,12 +40,6 @@
 
 		&:last-child {
 			border-bottom: 0.1rem solid var(--transparent-primary);
-		}
-
-		&[data-enabled='false'] {
-			.worker-id {
-				color: var(--text-tertiary);
-			}
 		}
 	}
 
