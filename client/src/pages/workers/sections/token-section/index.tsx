@@ -7,12 +7,10 @@ import type { QueueType } from '@handbrake-web/shared/types/queue';
 import { IsActiveTranscodeStage } from '@handbrake-web/shared/types/transcode';
 import RotateIcon from '@icons/arrow-clockwise.svg?react';
 import ClipboardIcon from '@icons/clipboard.svg?react';
-import PlayIcon from '@icons/play-fill.svg?react';
 import PlusIcon from '@icons/plus-lg.svg?react';
-import StopIcon from '@icons/stop-fill.svg?react';
 import TrashIcon from '@icons/trash-fill.svg?react';
 import CloseIcon from '@icons/x-lg.svg?react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import ButtonInput from '~components/base/inputs/button';
 import TextInput from '~components/base/inputs/text';
@@ -35,6 +33,7 @@ type Props = {
 type TokenRowProps = {
 	acceptsJobs: boolean;
 	activity: 'Idle' | 'N/A' | 'Working';
+	isPending: boolean;
 	isOnline: boolean;
 	lastUsedAt: number | null;
 	onRevoke: (workerID: string) => void;
@@ -86,6 +85,7 @@ const copyText = async (text: string) => {
 const TokenRow = memo(function TokenRow({
 	acceptsJobs,
 	activity,
+	isPending,
 	isOnline,
 	lastUsedAt,
 	onRevoke,
@@ -116,12 +116,24 @@ const TokenRow = memo(function TokenRow({
 				</strong>
 			</div>
 			<div className={styles['actions']}>
-				<ButtonInput
-					label={acceptsJobs ? 'Disable' : 'Enable'}
-					Icon={acceptsJobs ? StopIcon : PlayIcon}
-					color={acceptsJobs ? 'orange' : 'green'}
+				<button
+					aria-busy={isPending}
+					aria-checked={acceptsJobs}
+					aria-label={`Worker ${workerID}`}
+					className={styles['enabled-switch']}
+					data-enabled={acceptsJobs}
+					disabled={isPending}
 					onClick={() => onSetEnabled(workerID, !acceptsJobs)}
-				/>
+					role='switch'
+					type='button'
+				>
+					<span className={styles['switch-track']} aria-hidden='true'>
+						<span className={styles['switch-indicator']} />
+					</span>
+					<span className={styles['switch-label']}>
+						{acceptsJobs ? 'Enabled' : 'Disabled'}
+					</span>
+				</button>
 				<ButtonInput
 					label='Rotate Token'
 					Icon={RotateIcon}
@@ -145,6 +157,10 @@ export default function TokenSection({ connectedWorkerIDs, queue, socket, worker
 	const [isSaving, setIsSaving] = useState(false);
 	const [secret, setSecret] = useState<TokenSecret>();
 	const [copyMessage, setCopyMessage] = useState('');
+	const [pendingWorkerIDs, setPendingWorkerIDs] = useState<ReadonlySet<string>>(
+		() => new Set()
+	);
+	const pendingWorkerIDsRef = useRef(new Set<string>());
 
 	const connectedWorkers = useMemo(() => new Set(connectedWorkerIDs), [connectedWorkerIDs]);
 	const activeWorkers = useMemo(
@@ -158,6 +174,20 @@ export default function TokenSection({ connectedWorkerIDs, queue, socket, worker
 		[queue]
 	);
 	const trimmedWorkerID = workerID.trim();
+
+	useEffect(() => {
+		const clearPendingWorkers = () => {
+			if (pendingWorkerIDsRef.current.size == 0) return;
+
+			pendingWorkerIDsRef.current.clear();
+			setPendingWorkerIDs(new Set());
+		};
+
+		socket.on('disconnect', clearPendingWorkers);
+		return () => {
+			socket.off('disconnect', clearPendingWorkers);
+		};
+	}, [socket]);
 
 	const handleSecretResult = useCallback(
 		(fallbackWorkerID: string, result: WorkerAuthTokenSecretResultType) => {
@@ -238,12 +268,18 @@ export default function TokenSection({ connectedWorkerIDs, queue, socket, worker
 
 	const setWorkerEnabled = useCallback(
 		(workerID: string, acceptsJobs: boolean) => {
+			if (pendingWorkerIDsRef.current.has(workerID)) return;
+
+			pendingWorkerIDsRef.current.add(workerID);
+			setPendingWorkerIDs(new Set(pendingWorkerIDsRef.current));
 			setMessage('');
 			socket.emit(
 				'set-worker-enabled',
 				workerID,
 				acceptsJobs,
 				(result: WorkerAuthTokenActionResultType) => {
+					pendingWorkerIDsRef.current.delete(workerID);
+					setPendingWorkerIDs(new Set(pendingWorkerIDsRef.current));
 					setMessage(
 						result.message ||
 							(result.ok
@@ -313,6 +349,7 @@ export default function TokenSection({ connectedWorkerIDs, queue, socket, worker
 									? 'Working'
 									: 'Idle'
 						}
+						isPending={pendingWorkerIDs.has(record.worker_id)}
 						isOnline={connectedWorkers.has(record.worker_id)}
 						key={record.worker_id}
 						lastUsedAt={record.last_used_at}
