@@ -18,11 +18,17 @@ export default function DashboardSection() {
 		watchers,
 		workerTokens,
 	} = useContext(PrimaryContext)!;
+	const disabledWorkerIDs = new Set(
+		workerTokens.filter((token) => !token.accepts_jobs).map((token) => token.worker_id)
+	);
+	const availableWorkerCount = connections.workers.filter(
+		(worker) => !disabledWorkerIDs.has(worker.workerID)
+	).length;
 
 	return (
 		<Page className={styles['dashboard']} heading='Dashboard'>
 			<SummarySection
-				onlineWorkerCount={connections.workers.length}
+				availableWorkerCount={availableWorkerCount}
 				queueStatus={queueStatus}
 			/>
 			<QueueSection queue={queue} />

@@ -16,9 +16,14 @@ interface Properties {
 
 export default function WorkersSection({ queue, workers, properties, workerTokens }: Properties) {
 	const onlineWorkerIDs = new Set(workers.map((worker) => worker.workerID));
+	const disabledWorkerIDs = new Set(
+		workerTokens.filter((token) => !token.accepts_jobs).map((token) => token.worker_id)
+	);
 	const workerIDs = [
 		...new Set([...workerTokens.map((token) => token.worker_id), ...onlineWorkerIDs]),
-	].sort((a, b) => a.localeCompare(b));
+	]
+		.filter((workerID) => !disabledWorkerIDs.has(workerID))
+		.sort((a, b) => a.localeCompare(b));
 
 	return (
 		<Section className={styles['workers']} heading='Workers' link='/workers'>

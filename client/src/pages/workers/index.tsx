@@ -13,7 +13,7 @@ import styles from './styles.module.scss';
 export type WorkerInfo = {
 	properties?: WorkerProperties;
 	resourceUsage?: WorkerResourceUsage;
-	status: 'Idle' | 'Working';
+	status: 'Disabled' | 'Idle' | 'Working';
 	job?: {
 		inputPath: string;
 		progress: number;
@@ -25,6 +25,9 @@ export type WorkerInfoMap = Record<string, WorkerInfo>;
 export default function WorkersPage() {
 	const { connections, queue, properties, socket, workerResourceUsage, workerTokens } =
 		useContext(PrimaryContext)!;
+	const acceptsJobsByWorkerID = new Map(
+		workerTokens.map((token) => [token.worker_id, token.accepts_jobs])
+	);
 
 	const workerInfo: WorkerInfoMap = Object.fromEntries(
 		connections.workers.map((worker) => {
@@ -37,7 +40,11 @@ export default function WorkersPage() {
 				{
 					properties: properties[worker.workerID],
 					resourceUsage: workerResourceUsage[worker.workerID],
-					status: job ? 'Working' : 'Idle',
+					status: job
+						? 'Working'
+						: acceptsJobsByWorkerID.get(worker.workerID) === false
+							? 'Disabled'
+							: 'Idle',
 					job: job
 						? {
 								inputPath: job.input_path,
