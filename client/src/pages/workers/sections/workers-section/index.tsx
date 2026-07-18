@@ -415,7 +415,7 @@ export default function WorkersSection({ socket, workerInfo, workerTokens }: Pro
 						onClick={createToken}
 					/>
 					<p className={styles['create-help']}>
-						The <code>WORKER_ID</code> environment variable must match the chosen Worked ID.
+						The <code>WORKER_ID</code> environment variable must match the chosen Worker ID.
 					</p>
 				</div>
 				<div className={styles['message']} role='status' aria-live='polite'>
