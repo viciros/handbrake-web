@@ -366,12 +366,7 @@ export default function WorkersSection({ socket, workerInfo, workerTokens }: Pro
 				acceptsJobs,
 				(result: WorkerAuthTokenActionResultType) => {
 					finishWorkerAction(workerID);
-					setMessage(
-						result.message ||
-							(result.ok
-								? `Worker ${acceptsJobs ? 'enabled' : 'disabled'}.`
-								: 'Update failed.')
-					);
+					setMessage(result.ok ? '' : result.message || 'Update failed.');
 				}
 			);
 		},
