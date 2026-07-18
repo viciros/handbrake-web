@@ -214,8 +214,8 @@ const WorkerRow = memo(function WorkerRow({
 				<td colSpan={9}>
 					<div className={styles['details-grid']}>
 						<div className={styles['detail']}>
-							<h3>Last Online</h3>
-							<div>{formatTimestamp(lastUsedAt)}</div>
+							<h3>Last Seen</h3>
+							<div>{isOnline ? 'Online now' : formatTimestamp(lastUsedAt)}</div>
 						</div>
 						<div className={styles['detail']}>
 							<h3>Application Version</h3>
