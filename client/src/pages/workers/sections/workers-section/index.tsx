@@ -276,7 +276,7 @@ export default function WorkersSection({ socket, workerInfo, workerTokens }: Pro
 	const handleSecretResult = useCallback(
 		(fallbackWorkerID: string, result: WorkerAuthTokenSecretResultType) => {
 			setIsSaving(false);
-			setMessage(result.message || (result.ok ? 'Worker token updated.' : 'Update failed.'));
+			setMessage(result.ok ? '' : result.message || 'Update failed.');
 
 			if (result.ok && result.token) {
 				setSecret({
@@ -347,9 +347,7 @@ export default function WorkersSection({ socket, workerInfo, workerTokens }: Pro
 				workerID,
 				(result: WorkerAuthTokenActionResultType) => {
 					finishWorkerAction(workerID);
-					setMessage(
-						result.message || (result.ok ? 'Worker token revoked.' : 'Update failed.')
-					);
+					setMessage(result.ok ? '' : result.message || 'Update failed.');
 				}
 			);
 		},
@@ -413,12 +411,14 @@ export default function WorkersSection({ socket, workerInfo, workerTokens }: Pro
 						The <code>WORKER_ID</code> environment variable must match the chosen Worker ID.
 					</p>
 				</div>
-				<div className={styles['message']} role='status' aria-live='polite'>
-					{message || '\u00a0'}
-				</div>
 			</Section>
 
 			<Section className={styles['workers-section']} heading='Registered Workers'>
+				{message && (
+					<div className={styles['action-error']} role='alert' aria-live='assertive'>
+						{message}
+					</div>
+				)}
 				<div className={styles['table-frame']}>
 					<table className={styles['worker-table']}>
 						<thead>

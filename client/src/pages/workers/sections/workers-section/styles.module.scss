@@ -41,15 +41,18 @@
 		color: var(--text-tertiary);
 		font-size: 0.85rem;
 	}
-
-	.message {
-		min-height: 1.25em;
-		color: var(--text-tertiary);
-	}
 }
 
 .workers-section {
 	min-width: 0;
+
+	.action-error {
+		padding: 0.7rem 0.85rem;
+		border: 0.1rem solid var(--handbrake-red-text);
+		border-radius: 0.35rem;
+		background-color: color-mix(in srgb, var(--handbrake-red) 18%, transparent);
+		color: var(--handbrake-red-text);
+	}
 
 	.table-frame {
 		overflow-x: auto;
