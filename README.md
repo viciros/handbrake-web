@@ -94,7 +94,7 @@ On each server start until the web UI credentials are changed, HandBrake Web log
 
 Create a token for each worker on the Workers page, then put the one-time token value into that worker's `WORKER_TOKEN` environment variable. Set the worker's `SERVER_URL` to the full server URL, including the scheme and any non-default port. For remote workers outside a trusted local network, expose the server over HTTPS/TLS and use an `https://` URL.
 
-Workers retry server connections indefinitely with capped backoff, including after authentication failures and server-requested disconnects. Disabling a worker in the web UI keeps it authenticated and connected, lets active work finish, and prevents new job assignments. Rotate or revoke its token when you need to invalidate authentication and disconnect the worker.
+Workers retry server connections indefinitely with capped backoff, including after authentication failures and server-requested disconnects. Disabling a worker in the web UI keeps it authenticated and connected, lets active work finish, and prevents new job assignments. Rotating or revoking a token stops any active job with a bounded 15-second acknowledgement wait, invalidates authentication, and disconnects the worker.
 
 Every 10 seconds, each worker reports CPU and memory utilization for the Linux Docker host where that worker is running. Memory used is derived from Linux `MemAvailable` so reclaimable cache is handled correctly. Workers on the same Docker host report the same host-wide resource usage. These metrics use `/proc/stat` and `/proc/meminfo` and do not require privileged container access.
 

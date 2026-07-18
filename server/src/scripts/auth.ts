@@ -7,6 +7,7 @@ import type {
 	WorkerAuthTokenSecretResultType,
 } from '@handbrake-web/shared/types/auth';
 import type { ClientAuthType, WorkerAuthTokenType } from '@handbrake-web/shared/types/database';
+import { IsActiveTranscodeStage } from '@handbrake-web/shared/types/transcode';
 import type { NextFunction, Request, Response } from 'express';
 import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { ExtendedError, Socket } from 'socket.io';
@@ -25,7 +26,7 @@ import {
 	DatabaseInsertWorkerAuthToken,
 	DatabaseUpdateWorkerAuthToken,
 } from 'scripts/database/database-worker-auth';
-import { WorkerForAvailableJobs } from 'scripts/queue';
+import { GetQueue, StopJob, WorkerForAvailableJobs } from 'scripts/queue';
 
 type Credentials = {
 	username: string;
@@ -533,6 +534,103 @@ const disconnectWorkerWithToken = (workerID: string, action: string) => {
 	worker.disconnect(true);
 };
 
+type WorkerTokenActionState = {
+	acceptsJobs: boolean;
+};
+
+const pauseWorkerForTokenAction = async (
+	workerID: string,
+	token: WorkerAuthTokenType,
+	action: string
+): Promise<WorkerTokenActionState> => {
+	const worker = GetWorkerWithID(workerID);
+	if (worker) {
+		worker.data.acceptsJobs = false;
+	}
+
+	try {
+		const pausedToken = await DatabaseUpdateWorkerAuthToken(workerID, {
+			accepts_jobs: false,
+		});
+		if (!pausedToken) {
+			throw new Error(`Worker token for '${workerID}' disappeared before ${action}.`);
+		}
+	} catch (err) {
+		if (worker) {
+			worker.data.acceptsJobs = token.accepts_jobs;
+			if (token.accepts_jobs) {
+				try {
+					await WorkerForAvailableJobs(workerID);
+				} catch (queueError) {
+					logger.error(
+						`[auth] [error] Could not check for waiting jobs after token ${action} preparation failed for worker '${workerID}'.`
+					);
+					logger.error(queueError);
+				}
+			}
+		}
+		throw err;
+	}
+
+	try {
+		const activeJob = (await GetQueue()).find(
+			(job) =>
+				job.worker_id == workerID && IsActiveTranscodeStage(job.transcode_stage)
+		);
+		if (activeJob) {
+			logger.info(
+				`[auth] Stopping job '${activeJob.job_id}' before worker token ${action}.`
+			);
+			await StopJob(activeJob.job_id);
+		}
+	} catch (err) {
+		logger.error(
+			`[auth] [error] Could not stop the active job for worker '${workerID}' before token ${action}; continuing with credential invalidation.`
+		);
+		logger.error(err);
+	}
+
+	return { acceptsJobs: token.accepts_jobs };
+};
+
+const restoreWorkerAfterTokenActionFailure = async (
+	workerID: string,
+	state: WorkerTokenActionState,
+	action: string
+) => {
+	try {
+		const restoredToken = await DatabaseUpdateWorkerAuthToken(workerID, {
+			accepts_jobs: state.acceptsJobs,
+		});
+		if (!restoredToken) {
+			throw new Error(`Worker token for '${workerID}' could not be restored.`);
+		}
+
+		const worker = GetWorkerWithID(workerID);
+		if (worker) {
+			worker.data.acceptsJobs = state.acceptsJobs;
+		}
+	} catch (err) {
+		logger.error(
+			`[auth] [error] Could not restore worker '${workerID}' after failed token ${action}.`
+		);
+		logger.error(err);
+		disconnectWorkerWithToken(workerID, `failed ${action} recovery`);
+		return;
+	}
+
+	if (state.acceptsJobs && GetWorkerWithID(workerID)) {
+		try {
+			await WorkerForAvailableJobs(workerID);
+		} catch (err) {
+			logger.error(
+				`[auth] [error] Could not check for waiting jobs after restoring worker '${workerID}' from failed token ${action}.`
+			);
+			logger.error(err);
+		}
+	}
+};
+
 export async function GetWorkerAuthTokenRecords() {
 	const tokens = await DatabaseGetWorkerAuthTokens();
 	return tokens.map(toWorkerAuthTokenRecord);
@@ -583,13 +681,38 @@ export async function RotateWorkerAuthToken(
 	}
 
 	const token = generateWorkerToken();
-	const record = await DatabaseUpdateWorkerAuthToken(normalizedWorkerID, {
-		token_hash: await HashSecret(token),
-		updated_at: Date.now(),
-		last_used_at: null,
-	});
+	const tokenHash = await HashSecret(token);
+	const workerState = await pauseWorkerForTokenAction(
+		normalizedWorkerID,
+		existingToken,
+		'rotation'
+	);
 
-	if (!record) return { ok: false, message: 'Could not rotate worker token.' };
+	let record: WorkerAuthTokenType | undefined;
+	try {
+		record = await DatabaseUpdateWorkerAuthToken(normalizedWorkerID, {
+			token_hash: tokenHash,
+			accepts_jobs: workerState.acceptsJobs,
+			updated_at: Date.now(),
+			last_used_at: null,
+		});
+	} catch (err) {
+		await restoreWorkerAfterTokenActionFailure(
+			normalizedWorkerID,
+			workerState,
+			'rotation'
+		);
+		throw err;
+	}
+
+	if (!record) {
+		await restoreWorkerAfterTokenActionFailure(
+			normalizedWorkerID,
+			workerState,
+			'rotation'
+		);
+		return { ok: false, message: 'Could not rotate worker token.' };
+	}
 
 	disconnectWorkerWithToken(normalizedWorkerID, 'rotation');
 
@@ -608,8 +731,33 @@ export async function RevokeWorkerAuthToken(
 	const validationError = validateWorkerIDForTokenAction(normalizedWorkerID);
 	if (validationError) return { ok: false, message: validationError };
 
-	const didDelete = await DatabaseDeleteWorkerAuthToken(normalizedWorkerID);
+	const existingToken = await DatabaseGetWorkerAuthToken(normalizedWorkerID);
+	if (!existingToken) {
+		return { ok: false, message: 'No token exists for this worker.' };
+	}
+	const workerState = await pauseWorkerForTokenAction(
+		normalizedWorkerID,
+		existingToken,
+		'revocation'
+	);
+
+	let didDelete: boolean;
+	try {
+		didDelete = await DatabaseDeleteWorkerAuthToken(normalizedWorkerID);
+	} catch (err) {
+		await restoreWorkerAfterTokenActionFailure(
+			normalizedWorkerID,
+			workerState,
+			'revocation'
+		);
+		throw err;
+	}
 	if (!didDelete) {
+		await restoreWorkerAfterTokenActionFailure(
+			normalizedWorkerID,
+			workerState,
+			'revocation'
+		);
 		return { ok: false, message: 'No token exists for this worker.' };
 	}
 

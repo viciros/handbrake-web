@@ -178,6 +178,8 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 
 	let disconnectCount = 0;
 	let stopRequestCount = 0;
+	let stopTimeoutMs: number | undefined;
+	const tokenActionOrder: string[] = [];
 	const activeJobID = await DatabaseInsertJob({
 		input_path: path.join(videoPath, 'active-worker-input.mkv'),
 		output_path: path.join(videoPath, 'active-worker-output.mkv'),
@@ -191,12 +193,24 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 	const connectedWorker = {
 		data: { acceptsJobs: true },
 		disconnect: (close: boolean) => {
-			if (close) disconnectCount += 1;
+			if (close) {
+				disconnectCount += 1;
+				tokenActionOrder.push('disconnect');
+			}
 		},
 		handshake: { query: { workerID } },
-		timeout: () => ({
+		timeout: (timeoutMs: number) => ({
 			emitWithAck: async (event: string) => {
-				if (event == 'stop-transcode') stopRequestCount += 1;
+				if (event == 'stop-transcode') {
+					stopTimeoutMs = timeoutMs;
+					stopRequestCount += 1;
+					tokenActionOrder.push('stop');
+					assert.equal(connectedWorker.data.acceptsJobs, false);
+					assert.equal(
+						(await DatabaseGetWorkerAuthToken(workerID))?.accepts_jobs,
+						false
+					);
+				}
 			},
 		}),
 	};
@@ -275,23 +289,211 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 	const rotated = await RotateWorkerAuthToken(workerID);
 	assert.equal(rotated.ok, true);
 	assert.equal(disconnectCount, 1);
-	assert.equal(stopRequestCount, 0);
+	assert.equal(stopRequestCount, 1);
+	assert.equal(stopTimeoutMs, 15_000);
+	assert.deepEqual(tokenActionOrder, ['stop', 'disconnect']);
 	RemoveWorker(connectedWorker as never);
 	assert.ok(rotated.token);
 	assert.notEqual(rotated.token, created.token);
+	const stoppedActiveJob = await DatabaseGetJobStatusByIDOrUndefined(activeJobID);
+	assert.equal(stoppedActiveJob?.transcode_stage, TranscodeStage.Stopped);
+	assert.equal(stoppedActiveJob?.worker_id, null);
 
 	const storedRotatedToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedRotatedToken);
+	assert.equal(storedRotatedToken.accepts_jobs, true);
 	assert.equal(await VerifySecretHash(rotated.token, storedRotatedToken.token_hash), true);
 	assert.equal(storedRotatedToken.last_used_at, null);
 
 	const revoked = await RevokeWorkerAuthToken(workerID);
 	assert.equal(revoked.ok, true);
 	assert.equal(await DatabaseGetWorkerAuthToken(workerID), undefined);
-	await DatabaseUpdateJobStatus(activeJobID, {
-		transcode_stage: TranscodeStage.Stopped,
-		worker_id: null,
+});
+
+test('stops an active job before revoking a connected worker token', async () => {
+	const { CreateWorkerAuthToken, RevokeWorkerAuthToken } = await import('./auth');
+	const { AddWorker, RemoveWorker } = await import('./connections');
+	const {
+		DatabaseGetJobStatusByIDOrUndefined,
+		DatabaseInsertJob,
+		DatabaseUpdateJobStatus,
+	} = await import('./database/database-queue');
+	const { DatabaseGetWorkerAuthToken } = await import('./database/database-worker-auth');
+	const workerID = 'worker-revoke-stop-test';
+	const actionOrder: string[] = [];
+
+	assert.equal((await CreateWorkerAuthToken(workerID)).ok, true);
+	const activeJobID = await DatabaseInsertJob({
+		input_path: path.join(videoPath, 'revoke-worker-input.mkv'),
+		output_path: path.join(videoPath, 'revoke-worker-output.mkv'),
+		preset_category: 'General',
+		preset_id: 'Fast 1080p30',
 	});
+	await DatabaseUpdateJobStatus(activeJobID, {
+		transcode_stage: TranscodeStage.Transferring,
+		worker_id: workerID,
+	});
+	const connectedWorker = {
+		data: { acceptsJobs: true },
+		disconnect: (close: boolean) => {
+			if (close) actionOrder.push('disconnect');
+		},
+		handshake: { query: { workerID } },
+		timeout: (timeoutMs: number) => ({
+			emitWithAck: async (event: string) => {
+				assert.equal(event, 'stop-transcode');
+				assert.equal(timeoutMs, 15_000);
+				assert.equal(connectedWorker.data.acceptsJobs, false);
+				actionOrder.push('stop');
+			},
+		}),
+	};
+
+	AddWorker(connectedWorker as never);
+	const revoked = await RevokeWorkerAuthToken(workerID);
+	RemoveWorker(connectedWorker as never);
+
+	assert.equal(revoked.ok, true);
+	assert.deepEqual(actionOrder, ['stop', 'disconnect']);
+	assert.equal(await DatabaseGetWorkerAuthToken(workerID), undefined);
+	const stoppedJob = await DatabaseGetJobStatusByIDOrUndefined(activeJobID);
+	assert.equal(stoppedJob?.transcode_stage, TranscodeStage.Stopped);
+	assert.equal(stoppedJob?.worker_id, null);
+});
+
+test('continues token rotation when a worker does not acknowledge the stop request', async () => {
+	const { CreateWorkerAuthToken, RevokeWorkerAuthToken, RotateWorkerAuthToken } =
+		await import('./auth');
+	const { AddWorker, RemoveWorker } = await import('./connections');
+	const {
+		DatabaseGetJobStatusByIDOrUndefined,
+		DatabaseInsertJob,
+		DatabaseUpdateJobStatus,
+	} = await import('./database/database-queue');
+	const workerID = 'worker-stop-timeout-test';
+	let disconnectCount = 0;
+	let requestedTimeoutMs: number | undefined;
+
+	assert.equal((await CreateWorkerAuthToken(workerID)).ok, true);
+	const activeJobID = await DatabaseInsertJob({
+		input_path: path.join(videoPath, 'timeout-worker-input.mkv'),
+		output_path: path.join(videoPath, 'timeout-worker-output.mkv'),
+		preset_category: 'General',
+		preset_id: 'Fast 1080p30',
+	});
+	await DatabaseUpdateJobStatus(activeJobID, {
+		transcode_stage: TranscodeStage.Transcoding,
+		worker_id: workerID,
+	});
+	const unresponsiveWorker = {
+		data: { acceptsJobs: true },
+		disconnect: (close: boolean) => {
+			if (close) disconnectCount += 1;
+		},
+		handshake: { query: { workerID } },
+		timeout: (timeoutMs: number) => ({
+			emitWithAck: async () => {
+				requestedTimeoutMs = timeoutMs;
+				throw new Error('simulated acknowledgement timeout');
+			},
+		}),
+	};
+
+	AddWorker(unresponsiveWorker as never);
+	const rotated = await RotateWorkerAuthToken(workerID);
+	RemoveWorker(unresponsiveWorker as never);
+
+	assert.equal(rotated.ok, true);
+	assert.ok(rotated.token);
+	assert.equal(requestedTimeoutMs, 15_000);
+	assert.equal(disconnectCount, 1);
+	const stoppedJob = await DatabaseGetJobStatusByIDOrUndefined(activeJobID);
+	assert.equal(stoppedJob?.transcode_stage, TranscodeStage.Stopped);
+	assert.equal(stoppedJob?.worker_id, null);
+	assert.equal((await RevokeWorkerAuthToken(workerID)).ok, true);
+});
+
+test('stops an assigned job when revoking an offline worker token', async () => {
+	const { CreateWorkerAuthToken, RevokeWorkerAuthToken } = await import('./auth');
+	const {
+		DatabaseGetJobStatusByIDOrUndefined,
+		DatabaseInsertJob,
+		DatabaseUpdateJobStatus,
+	} = await import('./database/database-queue');
+	const workerID = 'offline-worker-revoke-test';
+
+	assert.equal((await CreateWorkerAuthToken(workerID)).ok, true);
+	const activeJobID = await DatabaseInsertJob({
+		input_path: path.join(videoPath, 'offline-worker-input.mkv'),
+		output_path: path.join(videoPath, 'offline-worker-output.mkv'),
+		preset_category: 'General',
+		preset_id: 'Fast 1080p30',
+	});
+	await DatabaseUpdateJobStatus(activeJobID, {
+		transcode_stage: TranscodeStage.Unknown,
+		worker_id: workerID,
+	});
+
+	assert.equal((await RevokeWorkerAuthToken(workerID)).ok, true);
+	const stoppedJob = await DatabaseGetJobStatusByIDOrUndefined(activeJobID);
+	assert.equal(stoppedJob?.transcode_stage, TranscodeStage.Stopped);
+	assert.equal(stoppedJob?.worker_id, null);
+});
+
+test('restores worker scheduling state when token rotation fails', async () => {
+	const {
+		CreateWorkerAuthToken,
+		RevokeWorkerAuthToken,
+		RotateWorkerAuthToken,
+		VerifySecretHash,
+	} = await import('./auth');
+	const { AddWorker, RemoveWorker } = await import('./connections');
+	const { sqliteDatabase } = await import('./database/database');
+	const { DatabaseGetWorkerAuthToken } = await import('./database/database-worker-auth');
+	const { AddWorkerProperties, RemoveWorkerProperties } = await import('./properties');
+	const workerID = 'worker-rotation-failure-test';
+	const triggerName = 'fail_worker_token_rotation_test';
+	let disconnectCount = 0;
+
+	const created = await CreateWorkerAuthToken(workerID);
+	assert.equal(created.ok, true);
+	assert.ok(created.token);
+	const connectedWorker = {
+		data: { acceptsJobs: true },
+		disconnect: (close: boolean) => {
+			if (close) disconnectCount += 1;
+		},
+		handshake: { query: { workerID } },
+	};
+	AddWorker(connectedWorker as never);
+	AddWorkerProperties(workerID, {
+		capabilities: { cpu: true, qsv: false, nvenc: false, vcn: false },
+		version: { application: 'test', handbrake: 'test' },
+	});
+
+	try {
+		sqliteDatabase.exec(`
+			CREATE TRIGGER ${triggerName}
+			BEFORE UPDATE OF token_hash ON worker_auth_tokens
+			WHEN OLD.worker_id = '${workerID}'
+			BEGIN
+				SELECT RAISE(ABORT, 'simulated token rotation failure');
+			END;
+		`);
+
+		await assert.rejects(RotateWorkerAuthToken(workerID), /simulated token rotation failure/);
+		const restoredToken = await DatabaseGetWorkerAuthToken(workerID);
+		assert.ok(restoredToken);
+		assert.equal(restoredToken.accepts_jobs, true);
+		assert.equal(await VerifySecretHash(created.token, restoredToken.token_hash), true);
+		assert.equal(connectedWorker.data.acceptsJobs, true);
+		assert.equal(disconnectCount, 0);
+	} finally {
+		sqliteDatabase.exec(`DROP TRIGGER IF EXISTS ${triggerName}`);
+		RemoveWorker(connectedWorker as never);
+		RemoveWorkerProperties(workerID);
+		await RevokeWorkerAuthToken(workerID);
+	}
 });
 
 test('migration preserves worker job acceptance state', async () => {

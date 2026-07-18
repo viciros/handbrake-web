@@ -181,15 +181,19 @@ const WorkerRow = memo(function WorkerRow({
 				<td>
 					<div className={styles['token-actions']}>
 						<ButtonInput
+							aria-busy={isPending}
 							className={`${styles['table-action']} ${styles['rotate-action']}`}
 							label='Rotate Token'
 							color='blue'
+							disabled={isPending}
 							onClick={() => onRotate(workerID)}
 						/>
 						<ButtonInput
+							aria-busy={isPending}
 							className={styles['table-action']}
 							label='Revoke'
 							color='red'
+							disabled={isPending}
 							onClick={() => onRevoke(workerID)}
 						/>
 					</div>
@@ -243,6 +247,17 @@ export default function WorkersSection({ socket, workerInfo, workerTokens }: Pro
 	);
 	const pendingWorkerIDsRef = useRef(new Set<string>());
 	const trimmedWorkerID = workerID.trim();
+	const beginWorkerAction = useCallback((actionWorkerID: string) => {
+		if (pendingWorkerIDsRef.current.has(actionWorkerID)) return false;
+
+		pendingWorkerIDsRef.current.add(actionWorkerID);
+		setPendingWorkerIDs(new Set(pendingWorkerIDsRef.current));
+		return true;
+	}, []);
+	const finishWorkerAction = useCallback((actionWorkerID: string) => {
+		pendingWorkerIDsRef.current.delete(actionWorkerID);
+		setPendingWorkerIDs(new Set(pendingWorkerIDsRef.current));
+	}, []);
 
 	useEffect(() => {
 		const clearPendingWorkers = () => {
@@ -291,64 +306,66 @@ export default function WorkersSection({ socket, workerInfo, workerTokens }: Pro
 
 	const rotateToken = useCallback(
 		(workerID: string) => {
+			if (pendingWorkerIDsRef.current.has(workerID)) return;
 			if (
 				!window.confirm(
-					`Rotate the token for '${workerID}'? This will disconnect the worker if it is online.`
+					`Rotate the token for '${workerID}'? Any active job will be stopped, then the worker will be disconnected.`
 				)
 			) {
 				return;
 			}
+			if (!beginWorkerAction(workerID)) return;
 
 			setMessage('');
 			socket.emit(
 				'rotate-worker-auth-token',
 				workerID,
 				(result: WorkerAuthTokenSecretResultType) => {
+					finishWorkerAction(workerID);
 					handleSecretResult(workerID, result);
 				}
 			);
 		},
-		[handleSecretResult, socket]
+		[beginWorkerAction, finishWorkerAction, handleSecretResult, socket]
 	);
 
 	const revokeToken = useCallback(
 		(workerID: string) => {
+			if (pendingWorkerIDsRef.current.has(workerID)) return;
 			if (
 				!window.confirm(
-					`Revoke the token for '${workerID}'? This will disconnect the worker if it is online.`
+					`Revoke the token for '${workerID}'? Any active job will be stopped, then the worker will be disconnected.`
 				)
 			) {
 				return;
 			}
+			if (!beginWorkerAction(workerID)) return;
 
 			setMessage('');
 			socket.emit(
 				'revoke-worker-auth-token',
 				workerID,
 				(result: WorkerAuthTokenActionResultType) => {
+					finishWorkerAction(workerID);
 					setMessage(
 						result.message || (result.ok ? 'Worker token revoked.' : 'Update failed.')
 					);
 				}
 			);
 		},
-		[socket]
+		[beginWorkerAction, finishWorkerAction, socket]
 	);
 
 	const setWorkerEnabled = useCallback(
 		(workerID: string, acceptsJobs: boolean) => {
-			if (pendingWorkerIDsRef.current.has(workerID)) return;
-
-			pendingWorkerIDsRef.current.add(workerID);
-			setPendingWorkerIDs(new Set(pendingWorkerIDsRef.current));
+			if (!beginWorkerAction(workerID)) return;
 			setMessage('');
 			socket.emit(
 				'set-worker-enabled',
 				workerID,
 				acceptsJobs,
 				(result: WorkerAuthTokenActionResultType) => {
-					pendingWorkerIDsRef.current.delete(workerID);
-					setPendingWorkerIDs(new Set(pendingWorkerIDsRef.current));
+					finishWorkerAction(workerID);
 					setMessage(
 						result.message ||
 							(result.ok
@@ -358,7 +375,7 @@ export default function WorkersSection({ socket, workerInfo, workerTokens }: Pro
 				}
 			);
 		},
-		[socket]
+		[beginWorkerAction, finishWorkerAction, socket]
 	);
 
 	const copySecret = () => {
