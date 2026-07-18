@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
-import { CalculateMemoryAvailablePercent } from '@handbrake-web/shared/funcs/resource.funcs';
+import { CalculateMemoryUsedPercent } from '@handbrake-web/shared/funcs/resource.funcs';
 import {
 	CalculateHostCpuPercent,
 	ParseHostCpuSample,
@@ -39,7 +39,7 @@ test('calculates host CPU utilization and rejects reset counters', () => {
 	);
 });
 
-test('parses host available and total memory and calculates the free percentage', () => {
+test('parses host available and total memory and calculates the used percentage', () => {
 	const memory = ParseHostMemorySample(
 		'MemTotal:       1048576 kB\nMemFree:         131072 kB\nMemAvailable:    786432 kB\n'
 	);
@@ -48,15 +48,17 @@ test('parses host available and total memory and calculates the free percentage'
 		totalBytes: 1073741824,
 	});
 	assert.equal(
-		CalculateMemoryAvailablePercent(memory!.availableBytes, memory!.totalBytes),
-		75
+		CalculateMemoryUsedPercent(memory!.availableBytes, memory!.totalBytes),
+		25
 	);
 	assert.equal(ParseHostMemorySample('MemTotal: 1024 kB\n'), null);
 	assert.equal(
 		ParseHostMemorySample('MemTotal: 1024 kB\nMemAvailable: 2048 kB\n'),
 		null
 	);
-	assert.equal(CalculateMemoryAvailablePercent(2, 1), null);
+	assert.equal(CalculateMemoryUsedPercent(0, 100), 100);
+	assert.equal(CalculateMemoryUsedPercent(100, 100), 0);
+	assert.equal(CalculateMemoryUsedPercent(2, 1), null);
 });
 
 test('samples host memory immediately and CPU after a second sample', async () => {

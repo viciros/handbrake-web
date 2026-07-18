@@ -1,4 +1,4 @@
-import { CalculateMemoryAvailablePercent } from '@handbrake-web/shared/funcs/resource.funcs';
+import { CalculateMemoryUsedPercent } from '@handbrake-web/shared/funcs/resource.funcs';
 import { WorkerCapabilities } from '@handbrake-web/shared/types/worker';
 import { HTMLAttributes } from 'react';
 import TextInfo from '~components/base/info/text-info';
@@ -30,10 +30,11 @@ const formatBytes = (bytes: number) => {
 	return `${value.toFixed(unitIndex == 0 ? 0 : 1)} ${units[unitIndex]}`;
 };
 
-const formatHostMemoryAvailable = (available: number | null, total: number | null) => {
-	const percentage = CalculateMemoryAvailablePercent(available, total);
+const formatHostMemoryUsage = (available: number | null, total: number | null) => {
+	const percentage = CalculateMemoryUsedPercent(available, total);
 	if (percentage == null || available == null || total == null) return 'Unavailable';
-	return `${percentage.toFixed(1)}% free (${formatBytes(available)} / ${formatBytes(total)})`;
+	const used = total - available;
+	return `${percentage.toFixed(1)}% used (${formatBytes(used)} / ${formatBytes(total)})`;
 };
 
 export default function WorkerCard({ worker, info, className, ...properties }: Properties) {
@@ -54,9 +55,9 @@ export default function WorkerCard({ worker, info, className, ...properties }: P
 									: `${resourceUsage.host_cpu_percent.toFixed(1)}%`
 								: 'Collecting'}
 						</TextInfo>
-						<TextInfo className={styles['text-info']} label='Host Memory Available'>
+						<TextInfo className={styles['text-info']} label='Host Memory Usage'>
 							{resourceUsage
-								? formatHostMemoryAvailable(
+								? formatHostMemoryUsage(
 										resourceUsage.host_memory_available_bytes,
 										resourceUsage.host_memory_total_bytes
 								  )

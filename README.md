@@ -96,7 +96,7 @@ Create a token for each worker on the Workers page, then put the one-time token 
 
 Workers retry server connections indefinitely with capped backoff, including after authentication failures and server-requested disconnects. Disabling a worker in the web UI stops any active job, disconnects the worker, and rejects reconnect attempts until it is enabled again; the worker process remains running and retrying. Rotate or revoke its token when you need to invalidate authentication.
 
-Every 10 seconds, each worker reports CPU utilization and available memory for the Linux Docker host where that worker is running. Workers on the same Docker host report the same host-wide resource usage. These metrics use `/proc/stat` and `/proc/meminfo` and do not require privileged container access.
+Every 10 seconds, each worker reports CPU and memory utilization for the Linux Docker host where that worker is running. Memory used is derived from Linux `MemAvailable` so reclaimable cache is handled correctly. Workers on the same Docker host report the same host-wide resource usage. These metrics use `/proc/stat` and `/proc/meminfo` and do not require privileged container access.
 
 Watch folders wait until a file's size and modification time have both remained unchanged for 60 seconds before creating a job. Set `HANDBRAKE_WATCHER_STABILITY_SECONDS` on the server to change this quiet period for slower or faster storage.
 

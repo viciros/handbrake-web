@@ -1,4 +1,4 @@
-export const CalculateMemoryAvailablePercent = (
+export const CalculateMemoryUsedPercent = (
 	availableBytes: number | null,
 	totalBytes: number | null
 ) => {
@@ -12,5 +12,5 @@ export const CalculateMemoryAvailablePercent = (
 		return null;
 	}
 
-	return (availableBytes / totalBytes) * 100;
+	return ((totalBytes - availableBytes) / totalBytes) * 100;
 };

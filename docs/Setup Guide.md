@@ -125,7 +125,7 @@ Worker tokens authenticate workers to the server. HTTPS/TLS lets remote workers 
 
 Workers remain running and retry the server indefinitely with capped backoff when the server is unavailable, rejects authentication, or requests a disconnect. Disabling a worker in the Workers page stops any active job, disconnects the worker, and rejects reconnect attempts until it is enabled again. Rotate or revoke the worker token when you need to invalidate authentication.
 
-Every 10 seconds, each connected worker reports CPU utilization and available memory for its own Linux Docker host. Workers on the same Docker host report the same host-wide resource usage. These metrics use `/proc/stat` and `/proc/meminfo` and do not require privileged container access.
+Every 10 seconds, each connected worker reports CPU and memory utilization for its own Linux Docker host. Memory used is derived from Linux `MemAvailable` so reclaimable cache is handled correctly. Workers on the same Docker host report the same host-wide resource usage. These metrics use `/proc/stat` and `/proc/meminfo` and do not require privileged container access.
 
 The server waits for watched files to have unchanged size and modification time for 60 seconds before adding them to the queue. Set `HANDBRAKE_WATCHER_STABILITY_SECONDS` in the server container environment to change the quiet period:
 
