@@ -129,8 +129,10 @@ export default function QueueJobRow({
 					<a
 						className={styles['job-log-link']}
 						href={`${serverURL}logs/jobs?id=${job.job_id}`}
-						title='Download Log'
-						aria-label={`Download log for ${getFilename(job.output_path || job.input_path)}`}
+						target='_blank'
+						rel='noreferrer'
+						title='View Log'
+						aria-label={`View log for ${getFilename(job.output_path || job.input_path)}`}
 					>
 						<LogIcon />
 					</a>

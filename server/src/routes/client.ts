@@ -18,7 +18,12 @@ export default function ClientRoutes(app: Express) {
 		if (id) {
 			const log = await GetJobLogByID(id);
 			if (log) {
-				res.download(log);
+				res.sendFile(log, {
+					headers: {
+						'Content-Disposition': `inline; filename="${path.basename(log)}"`,
+						'Content-Type': 'text/plain; charset=utf-8',
+					},
+				});
 			} else {
 				res.end();
 			}
