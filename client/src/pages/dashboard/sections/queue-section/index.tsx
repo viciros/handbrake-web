@@ -18,6 +18,7 @@ interface QueueTableProperties {
 	jobs: QueueType;
 	timeHeading: string;
 	formatTime: (job: QueueType[number]) => string;
+	showOrder: boolean;
 	showProgress: boolean;
 }
 
@@ -38,7 +39,12 @@ const formatTimeRemaining = (job: QueueType[number]) =>
 		: 'N/A';
 
 const formatCompletedAt = (job: QueueType[number]) =>
-	job.time_finished ? new Date(job.time_finished).toLocaleString() : 'N/A';
+	job.time_finished
+		? new Date(job.time_finished).toLocaleString(undefined, {
+				dateStyle: 'short',
+				timeStyle: 'short',
+			})
+		: 'N/A';
 
 const sortQueueJobs = (queue: QueueType) =>
 	[...queue].sort((a, b) => {
@@ -60,12 +66,12 @@ const sortQueueJobs = (queue: QueueType) =>
 const sortFinishedJobs = (queue: QueueType) =>
 	[...queue].sort((a, b) => (b.time_finished || 0) - (a.time_finished || 0));
 
-function QueueTable({ jobs, timeHeading, formatTime, showProgress }: QueueTableProperties) {
+function QueueTable({ jobs, timeHeading, formatTime, showOrder, showProgress }: QueueTableProperties) {
 	return (
 		<DashboardTable>
 			<thead>
 				<tr>
-					<th>#</th>
+					{showOrder && <th>#</th>}
 					<th>File</th>
 					<th>Worker</th>
 					<th>Status</th>
@@ -81,9 +87,11 @@ function QueueTable({ jobs, timeHeading, formatTime, showProgress }: QueueTableP
 
 					return (
 						<tr key={`queue-job-${job.job_id}`}>
-							<td className={styles['order']} align='center'>
-								{job.order_index}
-							</td>
+							{showOrder && (
+								<td className={styles['order']} align='center'>
+									{job.order_index}
+								</td>
+							)}
 							<td className={styles['input']} title={job.input_path}>
 								{job.input_path.match(/[^/]+$/)}
 								<BadgeInfo info={job.input_path} />
@@ -130,6 +138,7 @@ export default function QueueSection({ queue }: Properties) {
 					jobs={queuedJobs}
 					timeHeading='Time Remaining'
 					formatTime={formatTimeRemaining}
+					showOrder={true}
 					showProgress={true}
 				/>
 			</Section>
@@ -141,8 +150,7 @@ export default function QueueSection({ queue }: Properties) {
 					onClick={() => setIsFinishedCollapsed((isCollapsed) => !isCollapsed)}
 				>
 					<span>
-						Finished Transcodes
-						{isFinishedCollapsed && ` (${finishedJobs.length})`}
+						Finished Transcodes ({finishedJobs.length})
 					</span>
 					{isFinishedCollapsed ? <CaretDownIcon /> : <CaretUpIcon />}
 				</button>
@@ -151,6 +159,7 @@ export default function QueueSection({ queue }: Properties) {
 						jobs={finishedJobs}
 						timeHeading='Completed At'
 						formatTime={formatCompletedAt}
+						showOrder={false}
 						showProgress={false}
 					/>
 				)}

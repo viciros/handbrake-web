@@ -112,6 +112,7 @@ export default function ClientCredentialsForm({
 			{message && <div className={styles['message']}>{message}</div>}
 			<div className={styles['buttons']}>
 				<ButtonInput
+					className={styles['save-button']}
 					label={isSaving ? 'Saving' : submitLabel}
 					Icon={SaveIcon}
 					color='green'

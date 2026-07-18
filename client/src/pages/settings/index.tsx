@@ -37,6 +37,7 @@ export default function SettingsPage() {
 			>
 				<Section className={styles['buttons']}>
 					<ButtonInput
+						className={styles['save-button']}
 						label='Save Configuration'
 						Icon={SaveIcon}
 						onClick={handleSaveConfig}

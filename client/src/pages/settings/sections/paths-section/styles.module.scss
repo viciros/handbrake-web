@@ -16,5 +16,10 @@
 			flex-flow: column nowrap;
 			align-items: unset;
 		}
+
+		input:disabled {
+			color: var(--text-secondary);
+			opacity: 1;
+		}
 	}
 }
