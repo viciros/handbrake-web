@@ -1,6 +1,6 @@
 .queue-jobs-category,
 .pending-category-layout {
-	--queue-file-width: 30rem;
+	--queue-file-width: 40rem;
 	--queue-preset-width: 10rem;
 	--queue-worker-width: 10rem;
 	--queue-status-width: 8.25rem;
@@ -52,16 +52,16 @@
 	table-layout: fixed;
 
 	&[data-variant='active'] {
-		min-width: 115rem;
+		min-width: 125rem;
 	}
 
 	&[data-variant='finished'] {
-		min-width: 105rem;
+		min-width: 115rem;
 	}
 
 	&[data-variant='pending'],
 	&[data-variant='stopped'] {
-		min-width: 79rem;
+		min-width: 89rem;
 	}
 
 	.file-column {
