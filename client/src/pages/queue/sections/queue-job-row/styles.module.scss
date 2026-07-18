@@ -1,0 +1,160 @@
+.job-row {
+	height: var(--queue-row-height);
+	background-color: var(--background-tertiary);
+
+	td {
+		padding: 0.7rem 0.8rem;
+		border-bottom: 0.0625rem solid var(--background-four);
+		vertical-align: middle;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.file {
+		max-width: var(--queue-file-width);
+	}
+
+	.layout-spacer {
+		padding: 0;
+	}
+
+	.status-column {
+		padding-right: 1.25rem;
+		text-align: right;
+		overflow: visible;
+	}
+
+	.status {
+		font-weight: 700;
+
+		&[data-stage='scanning'],
+		&[data-stage='transcoding'],
+		&[data-stage='transferring'] {
+			color: var(--handbrake-blue-text);
+		}
+
+		&[data-stage='waiting'],
+		&[data-stage='unknown'] {
+			color: var(--handbrake-yellow);
+		}
+
+		&[data-stage='finished'] {
+			color: var(--handbrake-green-text);
+		}
+
+		&[data-stage='stopped'] {
+			color: var(--handbrake-orange);
+		}
+
+		&[data-stage='error'] {
+			color: var(--handbrake-red-text);
+		}
+	}
+
+	.job-log-link {
+		margin-left: 0.4rem;
+		color: var(--handbrake-blue-text);
+
+		svg {
+			width: 0.9rem;
+			height: 0.9rem;
+			display: inline-block;
+			vertical-align: -0.1rem;
+		}
+
+		&:focus-visible {
+			outline: 0.125rem solid var(--text-primary);
+			outline-offset: 0.15rem;
+		}
+	}
+
+	.progress-cell {
+		min-width: 9rem;
+	}
+
+	.progress {
+		min-width: 8rem;
+	}
+
+	.progress-label {
+		display: block;
+		margin-bottom: 0.2rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.progress-track {
+		display: block;
+		height: 0.35rem;
+		overflow: hidden;
+		border-radius: 0.2rem;
+		background-color: var(--background-four);
+	}
+
+	.progress-value {
+		display: block;
+		height: 100%;
+		background-color: var(--handbrake-blue-text);
+	}
+
+	.actions-column {
+		padding-left: 1.25rem;
+		overflow: visible;
+	}
+
+	.actions {
+		display: grid;
+		grid-template-columns: repeat(3, 4.65rem);
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.action {
+		min-width: 4.65rem;
+		min-height: 2.15rem;
+		padding: 0.32rem 0.6rem;
+		border: 0.0625rem solid var(--background-five);
+		border-radius: 0.3rem;
+		background-color: var(--background-four);
+		color: var(--text-primary);
+		font-family: var(--body-font);
+		font-size: 0.86rem;
+		font-weight: 650;
+		cursor: pointer;
+
+		&:hover {
+			outline: 0.125rem solid var(--text-primary);
+			outline-offset: 0.0625rem;
+		}
+
+		&:focus-visible {
+			outline: 0.125rem solid var(--text-primary);
+			outline-offset: 0.125rem;
+		}
+
+		&:disabled {
+			opacity: 38%;
+			cursor: not-allowed;
+		}
+
+		&:disabled:hover {
+			border-color: var(--background-five);
+			background-color: var(--background-four);
+			outline: none;
+		}
+	}
+
+	.stop {
+		border-color: transparent;
+		background-color: var(--handbrake-red);
+
+		&:hover {
+			background-color: var(--handbrake-red);
+		}
+
+		&:disabled:hover {
+			border-color: transparent;
+			background-color: var(--handbrake-red);
+		}
+	}
+}

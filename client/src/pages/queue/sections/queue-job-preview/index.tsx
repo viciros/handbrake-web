@@ -1,15 +1,20 @@
+import styles from './styles.module.scss';
+
 type Params = {
+	colSpan: number;
 	handleDrop: () => void;
 };
 
-export default function QueueJobPreview({ handleDrop }: Params) {
-	const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+export default function QueueJobPreview({ colSpan, handleDrop }: Params) {
+	const handleDragOver = (event: React.DragEvent<HTMLTableRowElement>) => {
 		event.preventDefault();
 	};
 
 	return (
-		<div className='drop-preview' onDragOver={handleDragOver} onDrop={handleDrop}>
-			<hr />
-		</div>
+		<tr className={styles['drop-preview']} onDragOver={handleDragOver} onDrop={handleDrop}>
+			<td colSpan={colSpan}>
+				<hr />
+			</td>
+		</tr>
 	);
 }

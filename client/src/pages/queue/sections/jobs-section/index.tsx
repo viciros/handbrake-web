@@ -99,6 +99,7 @@ export default function JobsSection({
 					queue={jobsInProgress}
 					id='jobs-in-progress'
 					label='In Progress'
+					variant='active'
 					handleStopJob={handleStopJob}
 					handleResetJob={handleResetJob}
 					handleRemoveJob={handleRemoveJob}
@@ -107,6 +108,7 @@ export default function JobsSection({
 					queue={jobsWaiting}
 					id='jobs-pending'
 					label='Pending'
+					variant='pending'
 					showHandles={true}
 					handleStopJob={handleStopJob}
 					handleResetJob={handleResetJob}
@@ -116,6 +118,7 @@ export default function JobsSection({
 					queue={jobsStopped}
 					id='jobs-stopped'
 					label='Stopped'
+					variant='stopped'
 					collapsable={true}
 					startCollapsed={false}
 					handleStopJob={handleStopJob}
@@ -126,6 +129,7 @@ export default function JobsSection({
 					queue={jobsFinshed}
 					id='jobs-finished'
 					label='Finished'
+					variant='finished'
 					collapsable={!onlyFinished}
 					startCollapsed={true}
 					handleStopJob={handleStopJob}
