@@ -1,6 +1,6 @@
 .queue-jobs-category,
 .pending-category-layout {
-	--queue-file-width: 15rem;
+	--queue-file-width: 30rem;
 	--queue-preset-width: 10rem;
 	--queue-worker-width: 10rem;
 	--queue-status-width: 8.25rem;
@@ -52,16 +52,16 @@
 	table-layout: fixed;
 
 	&[data-variant='active'] {
-		min-width: 100rem;
+		min-width: 115rem;
 	}
 
 	&[data-variant='finished'] {
-		min-width: 90rem;
+		min-width: 105rem;
 	}
 
 	&[data-variant='pending'],
 	&[data-variant='stopped'] {
-		min-width: 64rem;
+		min-width: 79rem;
 	}
 
 	.file-column {
@@ -74,10 +74,6 @@
 
 	.worker-column {
 		width: var(--queue-worker-width);
-	}
-
-	.fps-column {
-		width: 6rem;
 	}
 
 	.average-fps-column {

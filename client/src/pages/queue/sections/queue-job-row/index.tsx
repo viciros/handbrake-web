@@ -85,7 +85,6 @@ export default function QueueJobRow({
 
 			{variant == 'active' && (
 				<>
-					<td>{job.transcode_fps_current ? job.transcode_fps_current.toFixed(1) : '—'}</td>
 					<td>{averageFps}</td>
 					<td>
 						{job.time_started ? secondsToTime((Date.now() - job.time_started) / 1000) : '—'}

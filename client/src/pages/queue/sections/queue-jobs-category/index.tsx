@@ -128,7 +128,7 @@ export default function QueueJobsCategory({
 
 	if (queue.length == 0) return null;
 
-	const columnCount = variant == 'active' ? 10 : variant == 'finished' ? 8 : 6;
+	const columnCount = variant == 'active' ? 9 : variant == 'finished' ? 8 : 6;
 	const orderIndexOffset = orderedJobs[0].order_index - 1;
 	const jobRows = orderedJobs.map((job, index) => (
 		<QueueJobRow
@@ -184,7 +184,6 @@ export default function QueueJobsCategory({
 							<col className={styles['worker-column']} />
 							{variant == 'active' && (
 								<>
-									<col className={styles['fps-column']} />
 									<col className={styles['average-fps-column']} />
 									<col className={styles['elapsed-column']} />
 									<col className={styles['remaining-column']} />
@@ -211,7 +210,6 @@ export default function QueueJobsCategory({
 								<th scope='col'>Worker</th>
 								{variant == 'active' && (
 									<>
-										<th scope='col'>FPS</th>
 										<th scope='col'>Avg. FPS</th>
 										<th scope='col'>Elapsed</th>
 										<th scope='col'>Remaining</th>
