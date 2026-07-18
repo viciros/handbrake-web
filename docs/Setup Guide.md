@@ -123,7 +123,7 @@ environment:
 
 Worker tokens authenticate workers to the server. HTTPS/TLS lets remote workers verify the server and keeps tokens and media streams encrypted over untrusted networks.
 
-Workers remain running and retry the server indefinitely with capped backoff when the server is unavailable, rejects authentication, or requests a disconnect. Disabling a worker in the Workers page stops any active job, disconnects the worker, and rejects reconnect attempts until it is enabled again. Rotate or revoke the worker token when you need to invalidate authentication.
+Workers remain running and retry the server indefinitely with capped backoff when the server is unavailable, rejects authentication, or requests a disconnect. Disabling a worker in the Workers page keeps it authenticated and connected, lets active work finish, and prevents new job assignments. Rotate or revoke the worker token when you need to invalidate authentication and disconnect the worker.
 
 Every 10 seconds, each connected worker reports CPU and memory utilization for its own Linux Docker host. Memory used is derived from Linux `MemAvailable` so reclaimable cache is handled correctly. Workers on the same Docker host report the same host-wide resource usage. These metrics use `/proc/stat` and `/proc/meminfo` and do not require privileged container access.
 

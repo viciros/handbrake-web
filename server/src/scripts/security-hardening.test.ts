@@ -149,6 +149,7 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 	const {
 		AuthenticateWorkerSocket,
 		CreateWorkerAuthToken,
+		RequireWorkerHttpAuth,
 		RevokeWorkerAuthToken,
 		RotateWorkerAuthToken,
 		SetWorkerEnabled,
@@ -175,8 +176,8 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 	assert.equal(await VerifySecretHash(created.token, storedCreatedToken.token_hash), true);
 	assert.equal(await VerifySecretHash('wrong token', storedCreatedToken.token_hash), false);
 
-	let wasDisconnected = false;
-	let stoppedJobID: number | undefined;
+	let disconnectCount = 0;
+	let stopRequestCount = 0;
 	const activeJobID = await DatabaseInsertJob({
 		input_path: path.join(videoPath, 'active-worker-input.mkv'),
 		output_path: path.join(videoPath, 'active-worker-output.mkv'),
@@ -190,24 +191,24 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 	const connectedWorker = {
 		data: { acceptsJobs: true },
 		disconnect: (close: boolean) => {
-			wasDisconnected = close;
+			if (close) disconnectCount += 1;
 		},
 		handshake: { query: { workerID } },
 		timeout: () => ({
-			emitWithAck: async (_event: string, jobID: number) => {
-				stoppedJobID = jobID;
+			emitWithAck: async (event: string) => {
+				if (event == 'stop-transcode') stopRequestCount += 1;
 			},
 		}),
 	};
 	AddWorker(connectedWorker as never);
 	const disabled = await SetWorkerEnabled(workerID, false);
-	RemoveWorker(connectedWorker as never);
 	assert.equal(disabled.ok, true);
-	assert.equal(wasDisconnected, true);
-	assert.equal(stoppedJobID, activeJobID);
-	const stoppedJob = await DatabaseGetJobStatusByIDOrUndefined(activeJobID);
-	assert.equal(stoppedJob?.transcode_stage, TranscodeStage.Stopped);
-	assert.equal(stoppedJob?.worker_id, null);
+	assert.equal(disconnectCount, 0);
+	assert.equal(stopRequestCount, 0);
+	assert.equal(connectedWorker.data.acceptsJobs, false);
+	const activeJob = await DatabaseGetJobStatusByIDOrUndefined(activeJobID);
+	assert.equal(activeJob?.transcode_stage, TranscodeStage.Transcoding);
+	assert.equal(activeJob?.worker_id, workerID);
 	const storedDisabledToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedDisabledToken);
 	assert.equal(storedDisabledToken.accepts_jobs, false);
@@ -221,18 +222,45 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 		},
 		conn: { remoteAddress: 'paused-worker-test' },
 	};
-	await assert.rejects(
-		new Promise<void>((resolve, reject) => {
-			AuthenticateWorkerSocket(pausedWorkerSocket as never, (err) => {
-				if (err) reject(err);
-				else resolve();
-			});
-		}),
-		/worker disabled/
+	await new Promise<void>((resolve, reject) => {
+		AuthenticateWorkerSocket(pausedWorkerSocket as never, (err) => {
+			if (err) reject(err);
+			else resolve();
+		});
+	});
+	assert.equal((pausedWorkerSocket.data as { acceptsJobs?: boolean }).acceptsJobs, false);
+
+	let workerHttpNextCalled = false;
+	let workerHttpStatus: number | undefined;
+	const workerHttpResponse = {
+		locals: {} as { workerID?: string },
+		status: (status: number) => {
+			workerHttpStatus = status;
+			return workerHttpResponse;
+		},
+		send: () => workerHttpResponse,
+	};
+	await RequireWorkerHttpAuth(
+		{
+			header: (name: string) =>
+				({
+					authorization: `Bearer ${created.token}`,
+					'x-worker-id': workerID,
+				})[name.toLowerCase() as 'authorization' | 'x-worker-id'],
+			socket: { remoteAddress: 'paused-worker-http-test' },
+		} as never,
+		workerHttpResponse as never,
+		() => {
+			workerHttpNextCalled = true;
+		}
 	);
+	assert.equal(workerHttpNextCalled, true);
+	assert.equal(workerHttpStatus, undefined);
+	assert.equal(workerHttpResponse.locals.workerID, workerID);
 
 	const enabled = await SetWorkerEnabled(workerID, true);
 	assert.equal(enabled.ok, true);
+	assert.equal(connectedWorker.data.acceptsJobs, true);
 	const storedEnabledToken = await DatabaseGetWorkerAuthToken(workerID);
 	assert.ok(storedEnabledToken);
 	assert.equal(storedEnabledToken.accepts_jobs, true);
@@ -246,6 +274,9 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 
 	const rotated = await RotateWorkerAuthToken(workerID);
 	assert.equal(rotated.ok, true);
+	assert.equal(disconnectCount, 1);
+	assert.equal(stopRequestCount, 0);
+	RemoveWorker(connectedWorker as never);
 	assert.ok(rotated.token);
 	assert.notEqual(rotated.token, created.token);
 
@@ -257,6 +288,10 @@ test('creates, disables, enables, verifies, rotates, and revokes worker tokens',
 	const revoked = await RevokeWorkerAuthToken(workerID);
 	assert.equal(revoked.ok, true);
 	assert.equal(await DatabaseGetWorkerAuthToken(workerID), undefined);
+	await DatabaseUpdateJobStatus(activeJobID, {
+		transcode_stage: TranscodeStage.Stopped,
+		worker_id: null,
+	});
 });
 
 test('migration preserves worker job acceptance state', async () => {
